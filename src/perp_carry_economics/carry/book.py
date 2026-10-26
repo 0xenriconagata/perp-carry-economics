@@ -117,11 +117,11 @@ def run_book(
         funding = missed = unhedged = tbill = fee = topup = sold = liq_loss = sweep = 0.0
         liquidated = False
 
-        if i == 0:  # seed: buy N of spot from capital, post m0 N, open the short
+        if i == 0:  # seed: both legs at N / m (delta-neutral), spot from capital, post m0 N
             m_prev, p_prev = m, p
             spot_mtm = perp_mtm = 0.0
             b.reserve = capital
-            fee += b.set_spot(n_ / p, p, f_s)
+            fee += b.set_spot(n_ / m, p, f_s)
             b.reserve -= m0 * n_
             b.margin_cash = m0 * n_
             fee += b.set_perp(n_ / m, m, f_p)
@@ -168,6 +168,7 @@ def run_book(
                 # all equity left at m_liq is lost; == maintenance(m_liq q) unless clamped
                 liq_loss = b.margin_equity(m_liq)
                 perp_mtm += (m - m_liq) * q  # the MTM above ran to the close; stop it at m_liq
+                unhedged = spot_mtm + perp_mtm  # the spot move net of what the perp still hedged
                 b.margin_cash = b.perp_qty = 0.0
                 b.hedged, b.unhedged_until_us, b.pending_topup_us = False, ts + setting.tau_us, None
                 liquidated = True
@@ -196,12 +197,16 @@ def run_book(
                 equity = b.margin_equity(m)
                 if equity / (m * b.perp_qty) < setting.trigger:  # not healed: land it
                     topup = m0 * m * b.perp_qty - equity
-                    short = topup - min(topup, max(b.reserve, 0.0))
-                    if short > 0:  # sell spot for the rest and shrink the short by as much
-                        ds = short / (p * (1 - f_s))
+                    reserve0 = b.reserve
+                    short = topup - max(reserve0, 0.0)
+                    if short > 0:
+                        # joint solve: sell ds spot, buy back ds perp, move the whole reserve so
+                        # margin equity == m0 m (q - ds) after the buy-back fee
+                        ds = short / (p * (1 - f_s) + m0 * m - f_p * m)
                         fee += b.set_spot(b.spot_qty - ds, p, f_s)
                         fee += b.set_perp(b.perp_qty - ds, m, f_p)
                         sold += ds
+                        topup = b.reserve - min(reserve0, 0.0)  # a prior deficit stays put
                     b.reserve -= topup
                     b.margin_cash += topup
 

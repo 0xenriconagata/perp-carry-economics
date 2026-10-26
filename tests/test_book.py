@@ -89,11 +89,15 @@ def test_equity_changes_only_by_funding_tbill_fees_losses_sweeps_and_mtm(two_mon
     )
     residual = (lg["equity_usd"] - prev["equity_usd"] - flows)[1:]
     assert residual.abs().max() < TOL
-    # unhedged P&L is the spot MTM on bars that started unhedged, and nothing else
+    # unhedged P&L: the spot MTM on bars that started unhedged, spot + perp MTM on the
+    # liquidation bar, nothing on other bars
     started_unhedged = ~prev["hedged"].fill_null(True)
-    assert lg["unhedged_pnl_usd"].abs().sum() > 0
-    assert (lg["unhedged_pnl_usd"] - lg["spot_mtm_usd"]).filter(started_unhedged).abs().max() == 0
-    assert lg["unhedged_pnl_usd"].filter(~started_unhedged).abs().max() == 0
+    liq = lg["liquidated"]
+    upnl = lg["unhedged_pnl_usd"]
+    assert upnl.abs().sum() > 0
+    assert (upnl - lg["spot_mtm_usd"]).filter(started_unhedged).abs().max() == 0
+    assert (upnl - lg["spot_mtm_usd"] - lg["perp_mtm_usd"]).filter(liq).abs().max() == 0
+    assert upnl.filter(~started_unhedged & ~liq).abs().max() == 0
     # funding: the print pays rate x previous mark x previous short (0 while unhedged)
     rate = _two_month_bars()["funding_rate"]
     assert (
@@ -112,6 +116,28 @@ def test_flat_price_pnl_is_funding_minus_fees_and_tbill():
     assert lg["liquidated"].sum() == 0
     pnl = lg["funding_usd"].sum() + lg["tbill_usd"].sum() - lg["fee_usd"].sum()
     assert lg["sweep_usd"].sum() == pytest.approx(pnl, abs=TOL)
+    # Jan 31 23:59, before the first reset: funding sits in margin, T-bill in the reserve
+    jan31 = lg.row(31 * 1440 - 1, named=True)
+    prints = 31 * 3 - 1  # Jan 1 08:00 .. Jan 31 16:00
+    assert jan31["margin_equity"] == pytest.approx(CASH0 + prints * 1e-4 * P0 * Q0, abs=TOL)
+    reserve = 0.25 * N - F_S * N
+    for _ in range(31):  # one accrual per day_start, the seed day included
+        reserve += reserve * TBILL / 365
+    assert jan31["reserve"] == pytest.approx(reserve, abs=TOL)
+
+
+def test_seed_buys_both_legs_at_n_over_mark():
+    bars = frame(flat(1)).with_columns(spot=pl.col("mark") * 1.002)
+    seed = run(bars).row(0, named=True)
+    q, p = N / P0, P0 * 1.002
+    assert seed["spot_qty"] == q and seed["perp_qty"] == q
+    assert seed["fee_usd"] == pytest.approx(F_S * q * p + F_P * N, abs=1e-9)
+    reserve = 1.5 * N - q * p - F_S * q * p - 0.25 * N
+    assert seed["margin_equity"] == pytest.approx(0.25 * N - F_P * N, abs=TOL)
+    assert seed["reserve"] == pytest.approx(reserve * (1 + TBILL / 365), abs=TOL)
+    assert seed["equity_usd"] == pytest.approx(
+        q * p + 0.25 * N - F_P * N + reserve * (1 + TBILL / 365), abs=TOL
+    )
 
 
 def test_rally_within_tau_liquidates_with_exact_loss():
@@ -124,6 +150,8 @@ def test_rally_within_tau_liquidates_with_exact_loss():
     assert lg["liquidated"].to_list()[:3] == [False, True, False]
     assert lg["liq_loss_usd"][1] == pytest.approx(MAINT * m_liq * Q0, abs=TOL)
     assert lg["perp_mtm_usd"][1] == pytest.approx((P0 - m_liq) * Q0, abs=TOL)
+    # the spot move net of the part the perp still hedged up to m_liq
+    assert lg["unhedged_pnl_usd"][1] == pytest.approx((12_000.0 - m_liq) * Q0, abs=TOL)
     unhedged = lg[1:61]  # bars at +1 .. +60 minutes: before the liquidation bar + tau
     assert not unhedged["hedged"].any()
     assert (unhedged["perp_qty"] == 0).all()
@@ -131,6 +159,12 @@ def test_rally_within_tau_liquidates_with_exact_loss():
     back = lg.row(61, named=True)
     assert back["hedged"] and back["perp_qty"] > 0
     assert back["perp_qty"] == pytest.approx(back["spot_qty"], rel=1e-12)
+    # margin 0.25 x 12,000 x q from the whole reserve plus spot sold to make up the rest
+    reserve_before = (0.25 * N - F_S * N) * (1 + TBILL / 365)
+    ds = (0.25 * 12_000.0 * Q0 - reserve_before) / (12_000.0 * (1 - F_S) + 0.25 * 12_000.0)
+    assert back["spot_sold_btc"] == pytest.approx(ds, rel=1e-12)
+    assert back["spot_qty"] == pytest.approx(Q0 - ds, rel=1e-12)
+    assert back["reserve"] == pytest.approx(0.0, abs=TOL)
 
 
 def test_reestablish_uses_reserve_before_selling_spot():
@@ -179,13 +213,17 @@ def test_topup_sells_spot_when_reserve_exhausted_exact():
     reserve0 = (0.05 * N - F_S * N) * (1 + TBILL / 365)
     shortfall = a - reserve0
     assert shortfall > 0
-    ds = shortfall / (marks[land] * (1 - F_S))
+    m = marks[land]  # spot == mark
+    # joint solve: margin after == m0 m (q - ds) once the bought-back perp fee is paid
+    ds = shortfall / (m * (1 - F_S) + 0.25 * m - F_P * m)
     first = lg.filter(pl.col("topup_usd") != 0).row(0, named=True)
     assert first["ts_us"] == ts[land]
-    assert first["topup_usd"] == pytest.approx(a, abs=TOL)
+    assert first["topup_usd"] == pytest.approx(reserve0 + m * (1 - F_S) * ds, abs=TOL)
     assert first["spot_sold_btc"] == pytest.approx(ds, rel=1e-12)
     assert first["spot_qty"] == pytest.approx(Q0 - ds, rel=1e-12)
+    assert first["perp_qty"] == first["spot_qty"]
     assert first["reserve"] == pytest.approx(0.0, abs=TOL)
+    assert first["margin_frac"] == pytest.approx(0.25, abs=1e-9)
     hedged = lg.filter(pl.col("hedged"))
     assert ((hedged["perp_qty"] - hedged["spot_qty"]).abs() < 1e-12).all()
 
@@ -256,6 +294,10 @@ def test_reset_while_unhedged_rehedges():
     at8 = lg.row(ts.index(ts_of(2024, 2, 1, 8)), named=True)
     assert at8["funding_usd"] == pytest.approx(1e-4 * 13_000.0 * N / 13_000.0, rel=1e-12)
     assert lg["spot_sold_btc"].sum() == 0  # rehedged by the reset, not by re-establishing
+    # the old unhedged_until (23:50 + tau) passes with no second margin post
+    before, at = ts.index(ts_of(2024, 2, 1, 0, 49)), ts.index(ts_of(2024, 2, 1, 0, 50))
+    assert lg["margin_equity"][at] == pytest.approx(lg["margin_equity"][before], abs=TOL)
+    assert lg["reserve"][at] == pytest.approx(lg["reserve"][before], abs=TOL)
 
 
 def test_sum_of_sweeps_equals_final_equity_minus_capital(two_month):
