@@ -7,9 +7,9 @@ on every bar
     Δequity_usd == funding + tbill − fee − liq_loss − sweep + spot_mtm + perp_mtm
 
 where the two MTM terms are the legs' price changes at the quantities held at the bar's open.
-Per-bar step order (ruling R2): funding → reset → T-bill → equity → liquidation →
-re-establish → breach → landing; the seed replaces the reset on the first bar and the close-out
-runs after everything on the last.
+Per-bar step order (ruling R2): funding → filter exit/re-entry → reset → T-bill → equity →
+liquidation → re-establish → breach → landing; the seed replaces the reset on the first bar and
+the close-out runs after everything on the last.
 """
 
 from dataclasses import dataclass
@@ -37,6 +37,7 @@ class Book:
     pending_topup_us: int | None = None
     hedged: bool = False
     unhedged_until_us: int | None = None
+    flat: bool = False  # out by the filter signal, not by a liquidation
 
     def margin_equity(self, mark: float) -> float:
         return self.margin_cash + (self.perp_entry - mark) * self.perp_qty
@@ -98,8 +99,19 @@ def run_book(
     rules: Rules,
     mode: Mode,
     notional: float = NOTIONAL_USD,
+    signal: pl.Series | None = None,
 ) -> pl.DataFrame:
-    """Replay `bars` through the book; one ledger row per bar, state at the bar's end."""
+    """Replay `bars` through the book; one ledger row per bar, state at the bar's end.
+
+    `signal` (the cut filter's `in_position`, one value per bar) is acted on at the next bar,
+    after funding: turning False closes both legs and the whole book earns T-bill in the
+    reserve (flat by choice: no missed funding, a month start only sweeps down to the
+    capital); turning True re-enters with the seed procedure at the current reserve. Flat by
+    signal is not unhedged after a liquidation: exiting then sells the spot and cancels the
+    tau re-establish, and True while unhedged changes nothing until tau passes."""
+    if signal is not None and signal.len() != bars.height:
+        raise ValueError(f"signal has {signal.len()} values for {bars.height} bars")
+    in_pos = [True] * bars.height if signal is None else signal.to_list()
     n_ = notional
     m0, f_s, f_p = setting.m0, rules.spot_taker, rules.perp_taker
     # spot + initial margin + reserve; 1.5 N at PRIMARY (= CAPITAL_MULT x N)
@@ -138,8 +150,25 @@ def run_book(
             else:
                 unhedged = spot_mtm
                 if rate is not None:
-                    missed = rate * m_prev * b.spot_qty
-            if row["month_start"]:  # reset both legs to N, margin to m0 N, sweep the rest
+                    missed = rate * m_prev * b.spot_qty  # 0 while flat: no spot held
+            if b.flat and in_pos[i - 1]:  # re-enter: the seed at the current reserve
+                q = b.reserve / ((1 + m0 + setting.reserve_frac) * p)
+                fee += b.set_spot(q, p, f_s)
+                b.reserve -= m0 * m * q
+                b.margin_cash = m0 * m * q
+                fee += b.set_perp(q, m, f_p)
+                b.hedged, b.flat = True, False
+            elif not b.flat and not in_pos[i - 1]:  # exit: close both legs into the reserve
+                fee += b.set_perp(0.0, m, f_p)
+                fee += b.set_spot(0.0, p, f_s)
+                b.reserve += b.margin_cash
+                b.margin_cash = 0.0
+                b.hedged, b.unhedged_until_us, b.pending_topup_us = False, None, None
+                b.flat = True
+            if row["month_start"] and b.flat:
+                sweep += b.reserve - capital
+                b.reserve = capital
+            elif row["month_start"]:  # reset both legs to N, margin to m0 N, sweep the rest
                 q = n_ / m
                 fee += b.set_perp(q, m, f_p)
                 fee += b.set_spot(q, p, f_s)
