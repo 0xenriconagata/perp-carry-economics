@@ -22,3 +22,4 @@ DATA_DIR = Path(os.getenv("DATA_DIR") or ROOT / "data")
 RAW_DIR = DATA_DIR / "raw"
 INTERIM_DIR = DATA_DIR / "interim"
 RESULTS_DIR = ROOT / "results"
+VALIDATION_DIR = ROOT / "data_validation"

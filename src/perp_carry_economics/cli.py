@@ -2,13 +2,122 @@
 
 import argparse
 from collections.abc import Callable
+from datetime import date, timedelta
 
-COMMANDS: dict[str, Callable[[argparse.Namespace], None]] = {}
+import polars as pl
+
+from perp_carry_economics import checks, config
+from perp_carry_economics.bars import bars_path, build_bars, read_bars, write_bars
+from perp_carry_economics.carry.book import Mode, run_book
+from perp_carry_economics.config import CALIBRATION_END, PERIOD_START
+from perp_carry_economics.data.binance import (
+    fetch_all,
+    load_funding,
+    load_mark,
+    load_oi,
+    load_spot,
+)
+from perp_carry_economics.data.fred import fetch_dtb3, load_tbill
+from perp_carry_economics.data.rules import load_rules
+from perp_carry_economics.params import PRIMARY
+from perp_carry_economics.validate import input_hashes, write_report
+
+
+def default_end(today: date) -> date:
+    """First day of the last full month before `today`, so never a day of the current month
+    (whose monthly Binance files are not published yet)."""
+    return (today.replace(day=1) - timedelta(days=1)).replace(day=1)
+
+
+def _period_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--start", type=date.fromisoformat, default=PERIOD_START)
+    p.add_argument("--end", type=date.fromisoformat, default=default_end(date.today()))
+
+
+def fetch(args: argparse.Namespace) -> None:
+    """download the Binance and FRED raw files for [start, end)"""
+    fetch_all(args.start, args.end, config.RAW_DIR)
+    fetch_dtb3(config.RAW_DIR)
+    print(f"fetched [{args.start}, {args.end}) into {config.RAW_DIR}")
+
+
+def build(args: argparse.Namespace) -> None:
+    """build the minute bar table for [start, end) from the raw files"""
+    raw = config.RAW_DIR
+    tbill = load_tbill(raw, args.start, args.end)
+    bars = build_bars(
+        load_mark(raw), load_spot(raw), load_funding(raw), tbill, args.start, args.end
+    )
+    config.INTERIM_DIR.mkdir(parents=True, exist_ok=True)
+    write_bars(bars, config.INTERIM_DIR)
+    print(f"built {bars.height} bars [{args.start}, {args.end}) -> {bars_path(config.INTERIM_DIR)}")
+
+
+def _dtb3_prints(raw: pl.DataFrame) -> pl.DataFrame:
+    """Days with a DTB3 print (FRED's `.` is no print); columns read by position as in fred.py."""
+    return raw.filter(pl.col(raw.columns[1]) != ".").select(
+        day=pl.col(raw.columns[0]).str.to_date("%Y-%m-%d")
+    )
+
+
+def validate(args: argparse.Namespace) -> None:
+    """run checks D1-D4 on the raw files and E1-E3 on the calibration window, write the report"""
+    raw, start, end = config.RAW_DIR, args.start, args.end
+    day = pl.from_epoch("ts_us", "us").dt.date()
+    calib = read_bars(config.INTERIM_DIR).filter(
+        day.is_between(PERIOD_START, CALIBRATION_END, closed="left")
+    )
+    if calib.is_empty():
+        raise SystemExit("no bars in the calibration window; run `pce build` first")
+    rules = load_rules()
+    ledger = run_book(calib, PRIMARY, rules, Mode.SEPARATE)
+    results = [
+        checks.check_d1_funding_complete(load_funding(raw), start, end),
+        checks.check_d2_mark_gaps(load_mark(raw), start, end),
+        checks.check_d3_oi_daily(load_oi(raw), start, end),
+        checks.check_d4_tbill_covers(
+            _dtb3_prints(pl.read_csv(raw / "fred" / "DTB3.csv", infer_schema=False)), start, end
+        ),
+        checks.check_e1_funding_total(ledger, calib),
+        checks.check_e2_rerun_identical(calib, PRIMARY, rules),
+        checks.check_e3_cash_conservation(ledger),
+    ]
+    extra = {
+        "period": f"[{start}, {end})",
+        "calibration": f"[{PERIOD_START}, {CALIBRATION_END})",
+        "calibration_bars": calib.height,
+        "input_hashes": input_hashes(raw),
+    }
+    status = write_report(results, config.VALIDATION_DIR, extra)
+    failed = [r.name for r in results if r.status != "PASS"]
+    print(
+        f"validation {status}: {len(results) - len(failed)}/{len(results)} checks pass"
+        + (f" (failed: {', '.join(failed)})" if failed else "")
+        + f" -> {config.VALIDATION_DIR / 'validation_report.json'}"
+    )
+    if failed:
+        raise SystemExit(1)
+
+
+COMMANDS: dict[str, Callable[[argparse.Namespace], None]] = {
+    "fetch": fetch,
+    "build": build,
+    "validate": validate,
+}
+ARGS: dict[str, Callable[[argparse.ArgumentParser], None]] = {
+    "fetch": _period_args,
+    "build": _period_args,
+    "validate": _period_args,
+}
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="pce", description="BTC cash-and-carry backtest.")
-    parser.add_subparsers(dest="command")
+    sub = parser.add_subparsers(dest="command")
+    for name, run in COMMANDS.items():
+        p = sub.add_parser(name, help=run.__doc__)
+        if name in ARGS:
+            ARGS[name](p)
     args = parser.parse_args(argv)
     if args.command is None:
         parser.print_help()
