@@ -38,6 +38,24 @@ def test_load_rules_from_hand_built_file(tmp_path):
     assert r.maintenance(1000.0) == 0.02 * 1000 - 1.0
 
 
+@pytest.mark.parametrize(
+    "tiers",
+    [
+        [[100.0, 0.01, 0.0], [100.0, 0.02, 1.0], [None, 0.03, 2.0]],  # not strictly ascending
+        [[200.0, 0.01, 0.0], [100.0, 0.02, 1.0], [None, 0.03, 2.0]],  # descending
+        [[100.0, 0.01, 0.0], [200.0, 0.02, 1.0]],  # last bound finite
+        [[None, 0.01, 0.0], [None, 0.02, 1.0]],  # infinite before the last
+        [],
+    ],
+)
+def test_load_rules_refuses_bad_tiers(tmp_path, tiers):
+    d = json.loads(load_rules.__defaults__[0].read_text(encoding="utf-8"))
+    path = tmp_path / "rules.json"
+    path.write_text(json.dumps({**d, "tiers": tiers}))
+    with pytest.raises(ValueError, match="tier bounds must ascend"):
+        load_rules(path)
+
+
 def test_maintenance_uses_tier_rate_minus_amount():
     r = load_rules()
     assert r.maintenance(1e4) == 0.004 * 1e4

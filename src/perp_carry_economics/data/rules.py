@@ -35,12 +35,16 @@ class Rules:
 
 
 def load_rules(path: Path = ROOT / "assets" / "binance_rules.json") -> Rules:
+    """Raises ValueError unless tier bounds strictly ascend and only the last is infinite."""
     d = json.loads(path.read_text(encoding="utf-8"))
     # JSON has no infinity: the last tier's bound is null there and math.inf here.
     tiers = tuple(
         (math.inf if bound is None else float(bound), float(rate), float(amount))
         for bound, rate, amount in d["tiers"]
     )
+    bounds = [b for b, _, _ in tiers]
+    if bounds[-1:] != [math.inf] or bounds != sorted(set(bounds)):  # strictly ascending
+        raise ValueError(f"{path}: tier bounds must ascend and end with null (infinite): {bounds}")
     return Rules(
         spot_taker=d["spot_taker"],
         perp_taker=d["perp_taker"],
