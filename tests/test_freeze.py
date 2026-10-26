@@ -6,18 +6,25 @@ import pytest
 
 from perp_carry_economics import cli, config, freeze, params
 from perp_carry_economics.config import ROOT
+from perp_carry_economics.data import fred
+from perp_carry_economics.io import file_hash
 from perp_carry_economics.validate import input_hashes
 
 ASSET = ROOT / "assets" / "binance_rules.json"
 END = date(2026, 9, 1)
 
 
+def _lay_out(d):
+    for sub in ("funding", "fred"):
+        (d / sub).mkdir(parents=True)
+    (d / "funding" / "a.zip").write_bytes(b"x")
+    (d / "fred" / "DTB3.csv").write_bytes(b"observation_date,DTB3")
+    return d
+
+
 @pytest.fixture
 def raw(tmp_path):
-    d = tmp_path / "raw"
-    (d / "funding").mkdir(parents=True)
-    (d / "funding" / "a.csv").write_text("x\n")
-    return d
+    return _lay_out(tmp_path / "raw")
 
 
 def test_payload_has_every_param_name(raw):
@@ -44,7 +51,8 @@ def test_payload_has_every_key_and_the_frozen_texts(raw):
     assert p["rules"]["json"] == json.loads(ASSET.read_text(encoding="utf-8"))
     assert p["rules"]["text_hash"]
     assert p["spec"]["text_hash"]
-    assert list(p["input_hashes"]) == ["funding/a.csv"]
+    assert list(p["input_hashes"]) == ["fred/DTB3.csv", "funding/a.zip"]
+    assert p["dtb3"] == {"path": "assets/DTB3.csv", "hash": p["input_hashes"]["fred/DTB3.csv"]}
     assert p["check_tolerances"] == {
         "MARK_GAP_FAIL_MIN": 1440,
         "MARK_GAP_LIST_MIN": 5,
@@ -80,9 +88,32 @@ def test_read_freeze_refuses_changed_inputs(raw, tmp_path):
     payload = freeze.freeze_payload(raw, END)
     freeze.write_freeze(path, payload)
     assert freeze.read_freeze(path, payload["input_hashes"])["prediction"]
-    (raw / "funding" / "a.csv").write_text("changed\n")
-    with pytest.raises(SystemExit, match=r"funding/a\.csv"):
+    (raw / "funding" / "a.zip").write_bytes(b"changed")
+    with pytest.raises(SystemExit, match=r"missing: -; changed: funding/a\.zip"):
         freeze.read_freeze(path, input_hashes(raw))
+
+
+def test_read_freeze_ignores_extra_inputs(raw, tmp_path):
+    path = tmp_path / "carry_freeze.json"
+    freeze.write_freeze(path, freeze.freeze_payload(raw, END))
+    (raw / "funding" / "later-month.zip").write_bytes(b"y")  # a month after the frozen period
+    (raw / "funding" / "a.zip.CHECKSUM").write_bytes(b"sidecar")
+    (raw / "funding" / "b.zip.part").write_bytes(b"leftover")
+    assert freeze.read_freeze(path, input_hashes(raw))["prediction"]
+
+
+def test_read_freeze_refuses_a_missing_input(raw, tmp_path):
+    path = tmp_path / "carry_freeze.json"
+    freeze.write_freeze(path, freeze.freeze_payload(raw, END))
+    (raw / "funding" / "a.zip").unlink()
+    with pytest.raises(SystemExit, match=r"missing: funding/a\.zip; changed: -"):
+        freeze.read_freeze(path, input_hashes(raw))
+
+
+def test_payload_refuses_without_dtb3(raw):
+    (raw / "fred" / "DTB3.csv").unlink()
+    with pytest.raises(SystemExit, match="DTB3.csv missing"):
+        freeze.freeze_payload(raw, END)
 
 
 def test_read_freeze_refuses_changed_rules(raw, tmp_path, monkeypatch):
@@ -120,7 +151,8 @@ def cli_env(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "VALIDATION_DIR", tmp_path / "data_validation")
     monkeypatch.setattr(freeze, "FREEZE_PATH", tmp_path / "results" / "carry_freeze.json")
     monkeypatch.setattr(freeze, "RULES_PATH", tmp_path / "rules.json")
-    (tmp_path / "raw").mkdir()
+    monkeypatch.setattr(fred, "ASSET_PATH", tmp_path / "DTB3_asset.csv")
+    _lay_out(tmp_path / "raw")
     return tmp_path
 
 
@@ -150,15 +182,16 @@ def test_freeze_cli_refuses_failed_validation(cli_env):
     assert not freeze.FREEZE_PATH.exists()
 
 
-def test_freeze_cli_writes_and_prints_next_step(cli_env, capsys):
+def test_freeze_cli_writes_pins_dtb3_and_prints_next_step(cli_env, capsys):
     _rules(True)
-    (cli_env / "raw" / "f.csv").write_text("x\n")
     report = cli_env / "data_validation" / "validation_report.json"
     report.parent.mkdir()
     ok = {"status": "PASS", "checks": [{"name": "D1", "status": "PASS"}]}
     report.write_text(json.dumps({**ok, "input_hashes": input_hashes(cli_env / "raw")}))
     cli.main(["freeze", "--period-end", "2026-09-01"])
-    assert freeze.FREEZE_PATH.exists()
+    frozen = json.loads(freeze.FREEZE_PATH.read_text(encoding="utf-8"))
+    assert fred.ASSET_PATH.read_bytes() == (cli_env / "raw" / "fred" / "DTB3.csv").read_bytes()
+    assert frozen["dtb3"]["hash"] == file_hash(fred.ASSET_PATH)
     out = capsys.readouterr().out
-    assert "git add results/carry_freeze.json && git commit" in out
+    assert "git add results/carry_freeze.json assets/DTB3.csv && git commit" in out
     assert "git tag carry-preregistered" in out

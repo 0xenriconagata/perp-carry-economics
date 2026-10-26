@@ -9,6 +9,7 @@ from typing import Any
 
 from perp_carry_economics import params
 from perp_carry_economics.config import CALIBRATION_END, PERIOD_START, RESULTS_DIR, ROOT
+from perp_carry_economics.data import fred
 from perp_carry_economics.io import text_hash, write_text_atomic
 from perp_carry_economics.validate import input_hashes
 
@@ -20,6 +21,7 @@ FREEZE_KEYS = (
     "spec",
     "params",
     "rules",
+    "dtb3",
     "period",
     "capital",
     "seed",
@@ -86,6 +88,9 @@ def _episode_rules() -> str:
 
 
 def freeze_payload(raw_dir: Path, period_end: date) -> dict[str, Any]:
+    hashes = input_hashes(raw_dir)
+    if "fred/DTB3.csv" not in hashes:
+        raise SystemExit(f"{raw_dir / 'fred' / 'DTB3.csv'} missing; run `pce fetch`")
     return {
         "spec": {"path": SPEC_PATH.relative_to(ROOT).as_posix(), "text_hash": text_hash(SPEC_PATH)},
         "params": _params(),
@@ -93,6 +98,8 @@ def freeze_payload(raw_dir: Path, period_end: date) -> dict[str, Any]:
             "json": json.loads(RULES_PATH.read_text(encoding="utf-8")),
             "text_hash": text_hash(RULES_PATH),
         },
+        # `pce freeze` copies the hashed raw file to this path; fetch_dtb3 seeds from it
+        "dtb3": {"path": fred.ASSET_REL, "hash": hashes["fred/DTB3.csv"]},
         "period": {
             "start": PERIOD_START.isoformat(),
             "end": period_end.isoformat(),
@@ -104,7 +111,7 @@ def freeze_payload(raw_dir: Path, period_end: date) -> dict[str, Any]:
             for n in ("MARK_GAP_FAIL_MIN", "MARK_GAP_LIST_MIN", "OI_MISSING_DAYS_MAX_SHARE")
         },
         "episode_rules": _episode_rules(),
-        "input_hashes": input_hashes(raw_dir),
+        "input_hashes": hashes,
         "written_at": date.today().isoformat(),
     }
 
@@ -118,8 +125,9 @@ def write_freeze(path: Path, payload: dict[str, Any]) -> None:
 
 
 def read_freeze(path: Path, hashes: dict[str, str]) -> dict[str, Any]:
-    """The frozen record; stops (never writes) if the file is unreadable or was frozen on
-    other inputs, another rule snapshot or other params."""
+    """The frozen record; stops (never writes) if the file is unreadable, a frozen input is
+    missing from or differs in `hashes`, or the rule snapshot or params changed. Files in
+    `hashes` that the freeze does not list (a later month, say) are ignored."""
     keep = "it is never rewritten: restore it from git"
     try:
         frozen = json.loads(path.read_text(encoding="utf-8"))
@@ -130,12 +138,17 @@ def read_freeze(path: Path, hashes: dict[str, str]) -> dict[str, Any]:
     if missing := [k for k in FREEZE_KEYS if k not in frozen]:
         raise SystemExit(f"{path} lacks {missing}; {keep}")
     got = frozen["input_hashes"]
-    if got != hashes:
-        known = got if isinstance(got, dict) else {}
-        changed = sorted(k for k in known.keys() | hashes.keys() if known.get(k) != hashes.get(k))
+    known: dict[str, str] = got if isinstance(got, dict) else {}
+    missing = sorted(k for k in known if k not in hashes)
+    changed = sorted(k for k in known if k in hashes and hashes[k] != known[k])
+    if not known or missing or changed:
+
+        def few(ks: list[str]) -> str:
+            return ", ".join(ks[:5]) + (" ..." if len(ks) > 5 else "")
+
         raise SystemExit(
-            f"{path} was frozen on other inputs ({', '.join(changed[:5]) or 'input_hashes'} "
-            f"differ); {keep}"
+            f"{path} was frozen on other inputs (missing: {few(missing) or '-'}; changed: "
+            f"{few(changed) or '-'}{'' if known else '; no input_hashes recorded'}); {keep}"
         )
     rules = frozen["rules"]
     if not isinstance(rules, dict) or rules.get("text_hash") != text_hash(RULES_PATH):

@@ -120,19 +120,20 @@ def _sha256(path: Path) -> str:
 def download_verified(url: str, dest: Path, client: httpx.Client) -> Path:
     """Download url to dest unless a file matching Binance's published SHA256 is already there.
 
-    The .CHECKSUM text is saved next to the zip so validation can re-verify offline. If both
-    files exist and the zip matches the stored checksum, nothing is requested at all. A zip that
-    is missing, corrupt, or has no stored checksum goes through the network path.
+    The .CHECKSUM file is saved next to the zip as the exact bytes received, so validation can
+    re-verify offline (it is not an input: `validate.input_hashes` skips it). If both files
+    exist and the zip matches the stored checksum, nothing is requested at all. A zip that is
+    missing, corrupt, or has no stored checksum goes through the network path.
     """
     checksum_path = dest.with_name(dest.name + ".CHECKSUM")
     if dest.exists() and checksum_path.exists():
-        stored = checksum_path.read_text().split()
-        if stored and _sha256(dest) == stored[0]:
+        stored = checksum_path.read_bytes().split()
+        if stored and _sha256(dest) == stored[0].decode():
             return dest
-    checksum_text = client.get(url + ".CHECKSUM").raise_for_status().text
-    expected = checksum_text.split()[0]
+    checksum_body = client.get(url + ".CHECKSUM").raise_for_status().content
+    expected = checksum_body.split()[0].decode()
     if dest.exists() and _sha256(dest) == expected:
-        checksum_path.write_text(checksum_text)
+        checksum_path.write_bytes(checksum_body)
         return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(dest.name + ".part")
@@ -144,7 +145,7 @@ def download_verified(url: str, dest: Path, client: httpx.Client) -> Path:
         tmp.unlink()
         raise ChecksumError(f"checksum mismatch for {dest.name}")
     tmp.replace(dest)
-    checksum_path.write_text(checksum_text)
+    checksum_path.write_bytes(checksum_body)
     return dest
 
 

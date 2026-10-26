@@ -14,9 +14,13 @@ from pathlib import Path
 import httpx
 import polars as pl
 
+from perp_carry_economics.config import ROOT
 from perp_carry_economics.io import file_hash, write_text_atomic
 
 DTB3_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DTB3"
+# The series as frozen: `pce freeze` copies the hashed raw file here, committed with the freeze.
+ASSET_REL = "assets/DTB3.csv"
+ASSET_PATH = ROOT / ASSET_REL
 
 
 def _csv_path(raw_dir: Path) -> Path:
@@ -24,18 +28,23 @@ def _csv_path(raw_dir: Path) -> Path:
 
 
 def fetch_dtb3(raw_dir: Path) -> Path:
-    """Download the full DTB3 history to raw_dir/fred/DTB3.csv and record its SHA-256 next to it.
+    """Put the DTB3 history at raw_dir/fred/DTB3.csv and record its SHA-256 next to it.
 
-    FRED publishes no checksum, so the hash is recorded, not verified. A file already on disk is
-    kept as it is (no request): the pre-registration freeze hashes every raw input, and FRED
-    revises and extends the series. To refresh on purpose, delete the file by hand.
+    FRED revises and extends the series, so a download is not reproducible. The file comes,
+    in order: from disk if already there (no request); else from `assets/DTB3.csv`, the copy
+    `pce freeze` pins with the freeze (no request); else downloaded in full from FRED. FRED
+    publishes no checksum, so the hash is recorded, not verified. To refresh on purpose,
+    delete the file by hand (before a freeze only: the freeze hashes it).
     """
     dest = _csv_path(raw_dir)
     if not dest.exists():
         dest.parent.mkdir(parents=True, exist_ok=True)
         tmp = dest.with_name(dest.name + ".part")
-        with httpx.Client(timeout=120, follow_redirects=True) as client:
-            tmp.write_bytes(client.get(DTB3_URL).raise_for_status().content)
+        if ASSET_PATH.exists():
+            tmp.write_bytes(ASSET_PATH.read_bytes())
+        else:
+            with httpx.Client(timeout=120, follow_redirects=True) as client:
+                tmp.write_bytes(client.get(DTB3_URL).raise_for_status().content)
         tmp.replace(dest)
     sidecar = dest.with_name(dest.name + ".sha256")
     if not sidecar.exists():

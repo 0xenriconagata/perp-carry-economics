@@ -18,6 +18,10 @@ class _Resp:
         self.body = body
         self.text = hashlib.sha256(body).hexdigest() + "  file.zip\n"
 
+    @property
+    def content(self) -> bytes:
+        return self.text.encode()
+
     def raise_for_status(self):
         return self
 
@@ -86,7 +90,9 @@ def test_download_verified_skips_when_checksum_matches(tmp_path):
     dest = tmp_path / "x" / "a.zip"
     assert binance.download_verified("https://h/a.zip", dest, client) == dest
     assert dest.read_bytes() == b"zip bytes"
-    assert (tmp_path / "x" / "a.zip.CHECKSUM").exists()
+    # the sidecar is the bytes received: no platform newline (CRLF on Windows) is written
+    sidecar = (tmp_path / "x" / "a.zip.CHECKSUM").read_bytes()
+    assert sidecar == (hashlib.sha256(b"zip bytes").hexdigest() + "  file.zip\n").encode()
     assert not list(tmp_path.rglob("*.part"))
     n = len(client.urls)
     binance.download_verified("https://h/a.zip", dest, client)

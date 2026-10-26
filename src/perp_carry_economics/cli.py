@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import shutil
 from collections.abc import Callable
 from datetime import date, timedelta
 
@@ -11,6 +12,7 @@ from perp_carry_economics import checks, config, freeze, run
 from perp_carry_economics.bars import bars_path, build_bars, read_bars, write_bars
 from perp_carry_economics.carry.book import Mode, run_book
 from perp_carry_economics.config import CALIBRATION_END, PERIOD_START
+from perp_carry_economics.data import fred
 from perp_carry_economics.data.binance import (
     fetch_all,
     load_depth,
@@ -115,8 +117,11 @@ def freeze_cmd(args: argparse.Namespace) -> None:
         )
     require_pass(config.VALIDATION_DIR / "validation_report.json")
     freeze.write_freeze(freeze.FREEZE_PATH, freeze.freeze_payload(config.RAW_DIR, args.period_end))
+    # pin the series just hashed: FRED revises DTB3, so a later download would not match
+    shutil.copyfile(config.RAW_DIR / "fred" / "DTB3.csv", fred.ASSET_PATH)
     print(
-        f"froze {freeze.FREEZE_PATH}; next: git add results/carry_freeze.json && "
+        f"froze {freeze.FREEZE_PATH} and pinned {fred.ASSET_PATH}; next: "
+        f"git add results/carry_freeze.json {fred.ASSET_REL} && "
         'git commit -m "Pre-registration freeze" && git tag carry-preregistered'
     )
 

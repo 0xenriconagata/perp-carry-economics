@@ -213,6 +213,14 @@ def test_input_hashes_key_every_raw_file_by_relative_path(tmp_path):
     assert sorted(input_hashes(_raw(tmp_path))) == ["fred/DTB3.csv", "funding/x.zip"]
 
 
+def test_input_hashes_skip_sidecars_part_files_and_strays(tmp_path):
+    raw = _raw(tmp_path)
+    for name in ("funding/x.zip.CHECKSUM", "funding/y.zip.part", "fred/DTB3.csv.sha256"):
+        (raw / name).write_bytes(b"not an input")
+    (raw / "notes.zip").write_bytes(b"outside the Binance folders")
+    assert sorted(input_hashes(raw)) == ["fred/DTB3.csv", "funding/x.zip"]
+
+
 def test_write_report_json_is_sorted_lf_and_has_a_markdown_twin(tmp_path):
     path = _report(tmp_path, _raw(tmp_path))
     text = path.read_bytes().decode()

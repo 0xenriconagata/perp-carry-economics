@@ -9,14 +9,17 @@ from perp_carry_economics import config
 from perp_carry_economics.checks import CheckResult
 from perp_carry_economics.io import file_hash, write_text_atomic
 
+BINANCE_FOLDERS = ("funding", "mark", "spot", "metrics", "depth")
+
 
 def input_hashes(raw_dir: Path) -> dict[str, str]:
-    """SHA-256 of every file under raw_dir, keyed by its path relative to raw_dir."""
-    return {
-        p.relative_to(raw_dir).as_posix(): file_hash(p)
-        for p in sorted(raw_dir.rglob("*"))
-        if p.is_file()
-    }
+    """SHA-256 of every data file under raw_dir, keyed by its path relative to raw_dir.
+
+    Data files are the `*.zip` files in the Binance folders and `fred/DTB3.csv`; sidecars
+    (`.CHECKSUM`, `.sha256`), `.part` leftovers and anything else are not inputs."""
+    files = [p for f in BINANCE_FOLDERS for p in (raw_dir / f).glob("*.zip")]
+    files += [p for p in [raw_dir / "fred" / "DTB3.csv"] if p.exists()]
+    return {p.relative_to(raw_dir).as_posix(): file_hash(p) for p in sorted(files) if p.is_file()}
 
 
 def write_report(results: list[CheckResult], out_dir: Path, extra: dict[str, Any]) -> str:
