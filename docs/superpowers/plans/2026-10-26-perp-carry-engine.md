@@ -139,9 +139,10 @@ git add -A && git commit -m "Scaffold package, CI and atomic I/O"
   `TRIGGER = 0.15`, `TAU_US = 4 * HOUR_US`, `RESERVE_FRAC = M0`,
   `CAPITAL_MULT = 1.0 + M0 + RESERVE_FRAC` (= 1.5), `TAUS_H = (1, 4, 24)`,
   `M0S = (0.125, 0.25, 0.5)`, `TRIGGER_RATIO = 0.6`, `WORTH_IT_SPREAD = 0.02`,
-  `FILTER_PRINTS = 21`, `HURDLE_AMORTISE_DAYS = 30`, `BTC_COLLATERAL_HAIRCUT = 0.05`
-  (row (A), verify at freeze), `CAPACITY_HALF = 0.5`, `PRINTS_PER_DAY = 3`,
-  `PRINTS_PER_YEAR = 365 * 3`;
+  `FILTER_PRINTS = 21`, `HURDLE_AMORTISE_DAYS = 30`, `CAPACITY_HALF = 0.5`,
+  `PRINTS_PER_DAY = 3`, `PRINTS_PER_YEAR = 365 * 3`, `MARK_GAP_FAIL_MIN = 24 * 60`,
+  `MARK_GAP_LIST_MIN = 5`, `OI_MISSING_DAYS_MAX_SHARE = 0.02` (check tolerances live here so
+  the freeze records them; the (A) haircut lives only in `assets/binance_rules.json`);
   `@dataclass(frozen=True) class MarginSetting: m0: float; trigger: float; tau_us: int;
   reserve_frac: float`; `PRIMARY = MarginSetting(0.25, 0.15, 4 * HOUR_US, 0.25)`;
   `def sensitivity_grid() -> list[MarginSetting]` (9 settings, trigger `= 0.6 × m0`,
@@ -183,11 +184,15 @@ git add -A && git commit -m "Scaffold package, CI and atomic I/O"
   oi_usd, top_ls_position_ratio]` (5-min metrics); `load_depth(raw_dir) -> DataFrame[ts_us,
   pct: Float64, notional_usd: Float64]` (per minute, signed `pct` levels as published).
 
-- [ ] **Step 1: Verify the five URL shapes once against data.binance.vision** (one `HEAD` each
-  with `httpx`, for 2024-01 / 2024-01-15) and record the exact column headers of the metrics
-  and bookDepth CSVs in the module docstring. The spec's coverage table was taken on trust;
-  this step is where it is checked. If `markPriceKlines` 1m monthly files do not exist for a
-  month in the period, say so in the docstring and fall back to daily files for that month.
+- [ ] **Step 1: Verify the five URL shapes against data.binance.vision at the start of the
+  period** (one `HEAD` each with `httpx`: funding, mark klines and spot klines for 2020-09,
+  metrics for 2020-09-01, bookDepth for 2023-01-01; the risk is at the start, not in 2024)
+  and record the exact column headers of every CSV type in the module docstring, reading the
+  **oldest** file of each: the funding CSV had two columns before `funding_interval_hours`
+  was added, so the parser must accept both headers (never a fixed 3-name `new_columns` on a
+  2-column file). The spec's coverage table was taken on trust; this step is where it is
+  checked. If `markPriceKlines` 1m monthly files do not exist for a month in the period, say
+  so in the docstring and fall back to daily files for that month.
 
 - [ ] **Step 2: Write failing tests** using `make_zips.py` to write one funding zip (3 prints),
   one mark zip (3 bars), one metrics zip (2 rows), one bookDepth zip (4 rows):
@@ -215,7 +220,9 @@ git add -A && git commit -m "Scaffold package, CI and atomic I/O"
 **Interfaces:**
 - Produces: `DTB3_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DTB3"`;
   `fetch_dtb3(raw_dir: Path) -> Path` (saves `raw_dir / "fred" / "DTB3.csv"` plus a
-  `.sha256` sidecar; no checksum is published, so the hash is recorded, not verified);
+  `.sha256` sidecar; no checksum is published, so the hash is recorded, not verified; the
+  CSV header is `observation_date,DTB3` today and was `DATE,DTB3` — read the date column by
+  position, never by the name `DATE`);
   `load_tbill(raw_dir: Path, start: date, end: date) -> DataFrame[day: Date, rate: Float64]`
   — one row per calendar day in `[start, end)`, `rate` as a fraction per year (DTB3 is a
   percent, discount basis; divide by 100 and use as-is, stated in the docstring), forward-filled
@@ -239,22 +246,26 @@ git add -A && git commit -m "Scaffold package, CI and atomic I/O"
 
 **Interfaces:**
 - Produces: `@dataclass(frozen=True) class Rules: spot_taker: float; perp_taker: float;
-  liquidation_fee: float; btc_collateral_haircut: float; tiers: tuple[tuple[float, float],
-  ...]` (tiers as `(notional_upper_bound_usd, maintenance_rate)` ascending, last bound
-  `inf`); `load_rules(path: Path = ROOT / "assets" / "binance_rules.json") -> Rules`;
-  `Rules.maintenance_rate(self, notional_usd: float) -> float`;
+  liquidation_fee: float; btc_collateral_haircut: float; tiers: tuple[tuple[float, float,
+  float], ...]` (tiers as `(notional_upper_bound_usd, maintenance_rate,
+  maintenance_amount_usd)` ascending, last bound `inf`; Binance's schedule is `rate ×
+  notional − amount`, the amount makes it continuous across tiers);
+  `load_rules(path: Path = ROOT / "assets" / "binance_rules.json") -> Rules`;
+  `Rules.maintenance(self, notional_usd: float) -> float` (USD, `= rate × notional −
+  amount` of the tier containing `notional`);
   `Rules.round_trip_fee(self) -> float` (= `2 * (spot_taker + perp_taker)`);
-  `Rules.vip_variant(self, spot_taker, perp_taker) -> Rules`.
-- JSON fields: the five above plus `"vip": {"spot_taker", "perp_taker"}` (the tier a $10M
-  desk plausibly holds, used by Task 14's VIP row), `"source_urls"`, `"snapshot_date"`. Values
-  at this task: spot taker `0.001`, perp taker `0.0005`, liquidation fee `0.0125`, haircut
-  `0.05`, vip `0.0004` / `0.0002`, tiers
-  copied from Binance's BTCUSDT leverage-and-margin page on the day — with
-  `"snapshot_date"` set and `"verified": false` until the freeze task flips it.
+  `Rules.vip_variant(self) -> Rules` (the `vip` fees, everything else equal).
+- JSON fields: the five above plus `"vip": {"tier": "<Binance tier name>", "spot_taker",
+  "perp_taker"}` (name the tier so the reader can argue with it; used by Task 14's VIP row),
+  `"source_urls"`, `"snapshot_date"`. Values at this task: spot taker `0.001`, perp taker
+  `0.0005`, liquidation fee `0.0125`, haircut `0.05`, vip `0.0004` / `0.0002`, tiers (bound,
+  rate, amount) copied from Binance's BTCUSDT leverage-and-margin page on the day — with
+  `"snapshot_date"` set and `"verified": false` until the user flips it at freeze.
 
-- [ ] **Step 1: Write failing tests** `test_maintenance_rate_picks_tier_by_notional`
-  (`1e4 → first tier`, `1e7 → the tier containing 1e7`, `1e12 → last`),
-  `test_round_trip_fee`, `test_load_rules_reads_asset_file`.
+- [ ] **Step 1: Write failing tests** `test_maintenance_uses_tier_rate_minus_amount`
+  (`1e4 → first tier, amount 0`; `1e7 → rate × 1e7 − amount of the tier containing 1e7`;
+  `1e12 → last`), `test_maintenance_is_continuous_at_tier_bounds` (value just below and at a
+  bound agree to 1e-6), `test_round_trip_fee`, `test_load_rules_reads_asset_file`.
 
 - [ ] **Step 2–4: FAIL, implement, PASS.**
 
@@ -302,59 +313,110 @@ git add -A && git commit -m "Scaffold package, CI and atomic I/O"
 - Consumes: `params.MarginSetting`, `rules.Rules`, bar schema from Task 6.
 - Produces:
   `class Mode(StrEnum): SEPARATE = "B"; ONE_ACCOUNT = "A"`;
-  `@dataclass class Book` (mutable state): `qty: float` (BTC, both legs), `spot_qty: float`,
-  `perp_entry: float`, `margin_cash: float`, `reserve: float`, `pending_topup_us: int | None`,
-  `hedged: bool`, `unhedged_until_us: int | None`;
+  `@dataclass class Book` (mutable state, three cash pots and two legs): `perp_qty: float`
+  (BTC short; 0 while unhedged), `spot_qty: float` (BTC in custody), `perp_entry: float`,
+  `margin_cash: float` (the perp account: receives funding and realised perp P&L, pays perp
+  fees), `reserve: float` (USD at custody, in T-bills: receives spot sale proceeds, pays spot
+  fees and top-ups), `pending_topup_us: int | None`, `hedged: bool`, `unhedged_until_us: int |
+  None`;
   `run_book(bars: pl.DataFrame, setting: MarginSetting, rules: Rules, mode: Mode,
   notional: float = NOTIONAL_USD) -> pl.DataFrame` returning the **ledger**, one row per bar
-  with columns: `ts_us`, `qty`, `spot_qty`, `mark`, `margin_equity`, `margin_frac`,
-  `reserve`, `funding_usd` (signed, + = received), `fee_usd`, `topup_usd`, `spot_sold_btc`,
-  `liquidated: Boolean`, `liq_loss_usd`, `sweep_usd` (non-zero on month-start bars only),
-  `hedged: Boolean`;
+  with columns: `ts_us`, `mark`, `spot`, `perp_qty`, `spot_qty`, `spot_value_usd`
+  (`spot_qty × spot`), `margin_equity`, `margin_frac` (null when `perp_qty == 0`), `reserve`,
+  `equity_usd` (= `spot_value_usd + margin_equity + reserve`), `funding_usd` (signed, + =
+  received), `missed_funding_usd` (what the print would have paid on `spot_qty` while
+  unhedged), `unhedged_pnl_usd` (spot MTM change on bars while unhedged), `tbill_usd`,
+  `fee_usd`, `topup_usd`, `spot_sold_btc`, `liquidated: Boolean`, `liq_loss_usd`,
+  `sweep_usd`, `hedged: Boolean`;
   `events(ledger) -> pl.DataFrame` (rows where `liquidated` or `topup_usd != 0` or
   `sweep_usd != 0`).
-- Algorithm (the spec pins it; the implementer writes the body):
-  1. **Reset** on `month_start` bars (and the first bar): target `q* = notional / mark`;
-     trade spot `|spot_qty − q*|` at `spot` and perp `|qty − q*|` at `mark`, each paying its
-     taker fee; set `perp_entry = mark`, `margin_cash = m0 × notional`, `reserve = reserve_frac
-     × notional`; `sweep = total_equity_before − CAPITAL_MULT × notional − fees`; cancel any
-     pending top-up (Review Focus 3).
-  2. **Funding** on bars with `funding_rate`: `funding_usd = rate × mark × qty` credited to
-     `margin_cash` (short receives when positive) while `hedged`.
-  3. **T-bill** on `day_start` bars: `reserve *= (1 + tbill_rate / 365)`.
-  4. **Equity**: `margin_equity = margin_cash + (perp_entry − mark) × qty`;
-     `margin_frac = margin_equity / (mark × qty)`. In `ONE_ACCOUNT` mode add `(1 − haircut) ×
-     spot_qty × spot` to `margin_equity`, keep `reserve` idle in T-bills and never top up.
-  5. **Liquidation** if `margin_frac ≤ rules.maintenance_rate(mark × qty)` while hedged:
-     `liq_loss_usd = margin_equity + rules.liquidation_fee × mark × qty` (equity is lost;
-     the fee is charged in addition — stated conservative), `margin_cash = 0`, `hedged =
-     False`, `unhedged_until_us = ts_us + tau_us`, clear pending top-up.
-  6. **Re-establish** on the first bar with `ts_us ≥ unhedged_until_us`: `q = spot_qty / (1 +
-     m0)`; sell `spot_qty − q` spot, open short `q` at mark, `margin_cash = m0 × mark × q`,
-     fees on both; `hedged = True`.
-  7. **Breach** while hedged and no pending: if `margin_frac < trigger`, `pending_topup_us =
+- **Cash conservation** (the rule every step obeys, and the test that pins it): on every bar,
+  `equity_usd_after − equity_usd_before == funding_usd + tbill_usd − fee_usd − liq_loss_usd
+  − sweep_usd + mark_to_market`, where `mark_to_market` is the change in `spot_value_usd`
+  plus the change in perp unrealised P&L at unchanged quantities. `Σ sweep_usd` over the run
+  is the book's P&L (Task 9 reads it as `net_usd`).
+- Algorithm (the spec pins it; the implementer writes the body). `N = notional`, `f_s`,
+  `f_p` the taker rates, `p = spot`, `m = mark`:
+  1. **Seed** on the first bar: `spot_qty = N / p` bought from a reserve seeded at `1.5 N`
+     (spot fee `f_s N` from reserve), `perp_qty = N / m` opened at `m` (`margin_cash = m0 N
+     − f_p N`, i.e. the perp fee is paid from margin), `reserve = reserve_frac N`,
+     `perp_entry = m`, `hedged = True`; `sweep_usd = 0`. Equity after seeding is `1.5 N −
+     fees`.
+  2. **Reset** on later `month_start` bars while hedged (while flat by filter signal — Task 8 —
+     only the sweep in (e) runs): (a) realise the perp: `margin_cash += (perp_entry − m) ×
+     perp_qty`, `perp_entry = m`; (b) `q* = N / m`; trade perp `|perp_qty − q*|` at `m`,
+     fee from `margin_cash`; trade spot `|spot_qty − q*|` at `p`, proceeds to / cost from
+     `reserve`, fee from `reserve`; (c) `margin_cash` is set to `m0 N` by moving the
+     difference between `margin_cash` and `m0 N` to or from `reserve`; (d) if the book was
+     unhedged, it is hedged again now: `hedged = True`, `unhedged_until_us = None`; cancel any
+     pending top-up (Review Focus 3); (e) **sweep**: `sweep_usd = reserve − reserve_frac N`
+     and `reserve = reserve_frac N` (a negative sweep is the PM making up a shortfall, counted
+     as loss). After a reset the pots are exactly `spot_qty = q*`, `margin_cash = m0 N`,
+     `reserve = reserve_frac N`.
+  3. **Funding** on bars with `funding_rate` while hedged: `funding_usd = rate × m_prev ×
+     perp_qty` credited to `margin_cash` (short receives when positive; `m_prev` is the
+     previous bar's close, since the print is at this bar's open). While unhedged:
+     `missed_funding_usd = rate × m_prev × spot_qty`, nothing moves.
+  4. **T-bill** on `day_start` bars: `tbill_usd = reserve × tbill_rate / 365`, credited to
+     `reserve`.
+  5. **Equity**: `margin_equity = margin_cash + (perp_entry − m) × perp_qty`; `margin_frac =
+     margin_equity / (m × perp_qty)` (null if `perp_qty == 0`). In `ONE_ACCOUNT` mode
+     `margin_equity += (1 − haircut) × spot_qty × p`, `reserve` idles in T-bills, steps 7–9
+     never run.
+  6. **Liquidation** while hedged if `margin_equity ≤ rules.maintenance(m × perp_qty)`
+     (Task 5: `rate × notional − maintenance_amount`): `liq_loss_usd = margin_equity` (all
+     remaining equity is lost; it covers the clearance fee — conservative, stated in the
+     freeze, to be checked against Binance's published liquidation protocol), `margin_cash =
+     0`, `perp_qty = 0`, `hedged = False`, `unhedged_until_us = ts_us + tau_us`, clear
+     pending. Same-bar order: liquidation is evaluated before a landing top-up (conservative;
+     Task 10's closest-call metric relies on it).
+  7. **Re-establish** on the first bar with `ts_us ≥ unhedged_until_us`: the new margin
+     `m0 × m × q` is funded reserve-first, then by selling spot; `q` is the quantity that
+     leaves `spot_qty == perp_qty`: `ΔS = max(0, (m0 m spot_qty − reserve) / (p (1 − f_s) +
+     m0 m))`, sell `ΔS` spot (proceeds to reserve, fee from reserve), `q = spot_qty − ΔS`,
+     move `m0 m q` from reserve to `margin_cash`, open short `q` at `m` (fee from margin),
+     `perp_entry = m`, `hedged = True`.
+  8. **Breach** while hedged and no pending: if `margin_frac < trigger`, `pending_topup_us =
      ts_us + tau_us`.
-  8. **Landing** on the first bar with `ts_us ≥ pending_topup_us` (first bar after a gap
-     counts — Review Focus 1): re-evaluate; if `margin_frac` still `< trigger`, shortfall
-     `A = m0 × mark × qty − margin_equity`; take `min(A, reserve)` from reserve; remainder `B`:
-     sell `ΔS = B / (spot × (1 − spot_taker))` spot, buy back `ΔS` perp at mark (fee), `qty =
-     spot_qty`; credit `A` to `margin_cash`. Clear pending.
-  9. **End**: on the last bar, close both legs with fees; final `sweep` of all equity.
+  9. **Landing** on the first bar with `ts_us ≥ pending_topup_us` (the first bar after a gap
+     counts — Review Focus 1): re-evaluate; if `margin_frac` still `< trigger`, shortfall `A
+     = m0 m perp_qty − margin_equity`; take `min(A, reserve)` from reserve; remainder `B > 0`:
+     sell `ΔS = B / (p (1 − f_s))` spot (proceeds to reserve, fee from reserve), buy back
+     `ΔS` perp at `m` realising `(perp_entry − m) × ΔS` into `margin_cash` and paying `f_p m
+     ΔS` from margin, `perp_qty = spot_qty`; move `A` from reserve to `margin_cash`
+     (`topup_usd = A`, `spot_sold_btc = ΔS`). Clear pending.
+  10. **End** on the last bar: realise and close the perp at `m` (fee from margin), sell all
+      spot at `p` (fee from reserve), move `margin_cash` to reserve, then `sweep_usd =
+      reserve − 1.5 N`, so `Σ sweep_usd` is the whole P&L.
 
-- [ ] **Step 1: Write failing tests** (synthetic bars, `rules` with 10 bp / 5 bp fees, tiers
-  `((inf, 0.005),)`, `tau = 60 min`):
+- [ ] **Step 1: Write failing tests** (synthetic bars, `rules` with 10 bp / 5 bp fees, one tier
+  `(inf, 0.005, 0.0)`, `tau = 60 min`, `N = 1e6`):
+  - `test_equity_changes_only_by_funding_tbill_fees_losses_sweeps_and_mtm` — the cash
+    conservation identity holds on every bar of a 2-month run with a +30% rally and one
+    liquidation, to 1e-6.
   - `test_flat_price_pnl_is_funding_minus_fees_and_tbill` — 2 months flat, 3 prints/day at
-    1 bp: Σ`sweep_usd` equals Σ funding + reserve T-bill − fees to 1e-6.
-  - `test_rally_within_tau_liquidates` — +40% in 30 minutes with `m0=0.25`: exactly one
-    `liquidated` row, `liq_loss_usd > 0`, `hedged` False for 60 minutes, then re-established
-    with `qty == spot_qty` and `qty < qty_before`.
-  - `test_slow_rally_tops_up_from_reserve_first` — +15% over 6 hours: one `topup_usd` row,
-    `reserve` reduced by that amount, `spot_sold_btc == 0`, no liquidation.
-  - `test_topup_sells_spot_when_reserve_exhausted` — +45% over 2 days with `reserve_frac` 0.05:
-    `spot_sold_btc > 0` and after the landing `qty == spot_qty` (Review Focus 4).
+    1 bp: Σ`sweep_usd` equals Σ funding + Σ tbill − fees to 1e-6, and the entry fees are
+    exactly `f_s N + f_p N`.
+  - `test_rally_within_tau_liquidates_with_exact_loss` — two bars: `m` 10,000 → 13,000 in
+    one bar with `m0 = 0.25`: `liquidated` on bar 2, `liq_loss_usd == margin_cash +
+    (10,000 − 13,000) × perp_qty` from bar 1, `perp_qty == 0` after, `margin_frac` null,
+    `hedged` False for 60 minutes, then re-established with `perp_qty == spot_qty`.
+  - `test_reestablish_uses_reserve_before_selling_spot` — after a liquidation with the
+    reserve intact and `m0 m spot_qty ≤ reserve`: `spot_sold_btc == 0`, `perp_qty ==
+    spot_qty`.
+  - `test_slow_rally_tops_up_from_reserve_first_exact` — +15% over 6 hours: one `topup_usd`
+    row equal to the hand-computed `A`, `reserve` down by `A`, `spot_sold_btc == 0`.
+  - `test_topup_sells_spot_when_reserve_exhausted_exact` — `reserve_frac = 0.05`, +45% over 2
+    days: `spot_sold_btc` equals the hand-computed `ΔS` and `perp_qty == spot_qty` after
+    (Review Focus 4).
   - `test_breach_that_heals_before_tau_lands_nothing`.
   - `test_topup_lands_on_first_bar_after_gap` — remove the 30 bars around the deadline.
-  - `test_reset_cancels_pending_topup_and_restores_m0` (Review Focus 3).
+  - `test_reset_cancels_pending_topup_and_restores_pots` — after the reset `margin_cash ==
+    m0 N`, `reserve == reserve_frac N`, `spot_qty == N / m` (Review Focus 3).
+  - `test_reset_while_unhedged_rehedges` — liquidation 10 minutes before a month start with
+    `tau = 60 min`: the reset bar has `hedged` True and funding flows that month.
+  - `test_sum_of_sweeps_equals_final_equity_minus_capital` — any run: Σ`sweep_usd` ==
+    (equity after the last bar's close) − 1.5 N, to 1e-6.
   - `test_one_account_mode_never_liquidates_on_rally` — +300% over a month in `ONE_ACCOUNT`.
   - `test_ledger_is_byte_identical_on_rerun` — `run_book` twice, `frame_equal` and identical
     parquet bytes via `write_parquet_atomic`.
@@ -381,10 +443,16 @@ git add -A && git commit -m "Scaffold package, CI and atomic I/O"
   `in_position`, one value per bar: trailing `FILTER_PRINTS` prints' mean rate ×
   `PRINTS_PER_YEAR` is the annualised funding; exit (False) when it falls below `tbill_rate`;
   re-enter (True) when it exceeds `tbill_rate + rules.round_trip_fee() × 365 /
-  HURDLE_AMORTISE_DAYS`; starts True; evaluated on print bars, held between prints.
-- `run_book(..., signal=...)`: on a bar where `signal` turns False, close both legs at the
-  next bar with fees and move all equity to `reserve` (earning T-bill); where it turns True,
-  re-enter with the reset procedure. `hedged` is False while flat; `funding_usd` is 0.
+  HURDLE_AMORTISE_DAYS` (= 3.65 %/yr at the placeholder fees — large; the README says so);
+  True until `FILTER_PRINTS` prints exist; evaluated on print bars, held between prints.
+- `run_book(..., signal=...)`: on a bar where `signal` turns False, realise and close both
+  legs at the next bar (perp fee from margin, spot fee from reserve), move `margin_cash` to
+  `reserve`, `perp_qty = spot_qty = 0`, `hedged = False`; the whole book then earns T-bill
+  in `reserve`. Where it turns True, re-enter with Task 7's seed procedure at the current
+  `reserve` (not `1.5 N`): spot `q = reserve / ((1 + m0 + reserve_frac) p)`, margin `m0 p q`,
+  the rest stays in reserve. While flat, `month_start` runs only the sweep
+  (Task 7 step 2e) and `funding_usd` is 0; `missed_funding_usd` is **not** recorded while
+  flat by choice (the filter chose to be out).
 - `negative_stretches(funding: pl.DataFrame) -> pl.DataFrame[start_us, end_us, prints,
   mean_rate]` — maximal runs of consecutive negative prints (the "short and mean-reverting"
   prior, reported in results).
@@ -405,21 +473,26 @@ git add -A && git commit -m "Scaffold package, CI and atomic I/O"
 - Create: `src/perp_carry_economics/carry/yields.py`, `tests/test_yields.py`
 
 **Interfaces:**
-- Produces: `@dataclass(frozen=True) class Decomposition`: `years: float`,
-  `gross_funding_usd` (Σ positive `funding_usd`), `negative_funding_usd` (Σ negative),
-  `fees_usd`, `liq_loss_usd`, `tbill_on_idle_usd`, `net_usd` (Σ `sweep_usd`),
-  `capital_usd` (= `CAPITAL_MULT × notional`), `gross_yield` (= gross / notional / years,
-  the pitch-deck number), `net_yield` (= net / capital / years), `tbill_mean` (capital-weighted
-  mean daily rate over the period), `spread` (= net_yield − tbill_mean);
+- Produces: `@dataclass(frozen=True) class Decomposition`: `years: float` (= (last bar −
+  first bar) / 365.25 days), `gross_funding_usd` (Σ positive `funding_usd`),
+  `negative_funding_usd` (Σ negative), `fees_usd`, `liq_loss_usd`, `missed_funding_usd`,
+  `unhedged_pnl_usd`, `tbill_on_idle_usd` (Σ `tbill_usd`), `basis_usd` (the residual below),
+  `net_usd` (Σ `sweep_usd`), `capital_usd` (= `CAPITAL_MULT × notional`), `gross_yield` (=
+  gross / notional / years, the pitch-deck number), `net_yield` (= net / capital / years),
+  `tbill_mean` (simple mean of the daily `tbill_rate` over the period; capital is fixed so
+  weighting is moot), `spread` (= net_yield − tbill_mean);
   `decompose(ledger: pl.DataFrame, bars: pl.DataFrame, notional: float) -> Decomposition`;
   `Decomposition.row(self, label: str) -> dict[str, float | str]` for tables;
   `worth_it(d: Decomposition) -> bool` (= `d.spread >= WORTH_IT_SPREAD`).
-- Identity test: `net_usd == gross + negative − fees − liq_loss + tbill_on_idle ±
-  basis_usd` where `basis_usd` is the residual (spot-vs-mark convergence realised at resets),
-  reported as its own field `basis_usd`.
+- Identity: `net_usd == gross + negative − fees − liq_loss + unhedged_pnl + tbill_on_idle +
+  basis_usd`, where `basis_usd` is defined as the residual: spot-vs-mark convergence realised
+  at resets and closes. `missed_funding_usd` is reported beside the table, not in the identity
+  (it never moved cash). Every row of the decomposition table uses `capital_usd` as the
+  denominator for `net_yield` and `spread`.
 
 - [ ] **Step 1: Write failing tests** on a tiny hand-built ledger: `test_decomposition_identity_closes`
-  (residual equals the hand-computed basis), `test_gross_uses_spot_notional_net_uses_capital`,
+  (residual equals the hand-computed basis on a two-reset ledger),
+  `test_gross_uses_spot_notional_net_uses_capital`, `test_years_from_bar_span`,
   `test_worth_it_threshold_is_2pp`.
 
 - [ ] **Step 2–4: FAIL, implement, PASS. Step 5: Commit** `git commit -m "Yield decomposition and spread over T-bill"`
@@ -436,9 +509,12 @@ git add -A && git commit -m "Scaffold package, CI and atomic I/O"
   date; anchor_us: int; note: str`;
   `liquidation_week(ledger: pl.DataFrame, setting: MarginSetting, rules: Rules) -> Episode`
   — the ISO week (Monday 00:00 UTC) containing the first `liquidated` bar; if none, the week
-  containing the bar with the highest `closest_call = (trigger − min margin_frac within the
-  following tau) / (trigger − maintenance)` over bars where a top-up was pending, `note =
-  "no liquidation; closest call"`;
+  containing the bar with the highest `closest_call = (trigger − min margin_frac while the
+  top-up was pending) / (trigger − maintenance_frac)` over breach bars, where
+  `maintenance_frac = rules.maintenance(mark × perp_qty) / (mark × perp_qty)` at that bar,
+  `note = "no liquidation; closest call"`;
+  `week_slice` also carries `spot_value_usd`, `margin_equity` and `funding_usd` so the
+  episode can show the P&L path of both legs (spec §8);
   `inversion_week(bars: pl.DataFrame) -> Episode` — the week containing the print with the
   lowest trailing-21-print mean funding;
   `week_slice(ledger, episode) -> pl.DataFrame` (that week's rows, for figures later).
@@ -459,30 +535,45 @@ git add -A && git commit -m "Scaffold package, CI and atomic I/O"
 **Interfaces:**
 - Consumes: Task 3 `load_oi`, `load_depth`; Task 9 `Decomposition`.
 - Produces:
+  All capacity terms are **annualised fractions of capital deployed (1.5 × notional)**, the
+  same unit as `Decomposition.spread`; that sentence goes into the freeze text.
   `fit_kappa(funding: pl.DataFrame, oi: pl.DataFrame) -> tuple[float, float, int]` —
-  OLS of per-print funding change `Δr_t` on `Δlog(top_ls_position_ratio)` sampled at the same
-  prints; returns `(kappa, stderr, n)`; `kappa` is expected positive (more longs → higher
-  funding) and is used with `Δlog ratio = −log(1 + s)` for a short that is share `s` of OI.
-  **The regression form is frozen in `results/carry_freeze.json` by Task 13; this is the
-  author's default** and the README labels it a model.
+  OLS of per-print funding change `Δr_t` on `Δlog(top_ls_position_ratio)` (the metrics column
+  `sum_toptrader_long_short_ratio`, positions not accounts) sampled at the same prints;
+  returns `(kappa, stderr, n)`; `kappa` is expected positive (more longs → higher funding).
+  A short of share `s` of OI (USD) shifts the ratio by `Δlog ratio = −log(1 + 2s)`, on the
+  declared assumption that top-trader shorts are half of OI and the position counts among
+  them. **The regression form and that assumption are frozen in `results/carry_freeze.json`
+  by Task 13; this is the author's default** and the README labels it a model.
   `oi_share(size_usd: float, oi: pl.DataFrame) -> float` (median `size / oi_usd` over the
-  period); `funding_haircut(size_usd, kappa, oi) -> float` (per-print rate reduction `=
-  kappa × log(1 + oi_share)`);
-  `depth_cost(size_usd: float, depth: pl.DataFrame, reset_ts: pl.Series) -> float` — mean
-  round-trip slippage fraction walking the published `pct`/`notional_usd` levels at each
-  reset minute from 2023-01-01, perp side, applied to both legs (spot proxied — spec 9);
+  period); `funding_haircut_yield(size_usd, kappa, oi) -> float` (= `kappa × log(1 + 2 ×
+  oi_share) × PRINTS_PER_YEAR / CAPITAL_MULT`);
+  `depth_cost(size_usd: float, depth_at: pl.DataFrame) -> float` — slippage fraction of one
+  perp-side fill of `size_usd` against one published depth snapshot: bands are consumed in
+  order of distance from mid; within a band the density is uniform, so consuming fraction `x`
+  of band `k` (from `pct_{k−1}` to `pct_k`) costs `pct_{k−1} + x × (pct_k − pct_{k−1}) / 2`
+  on that slice; the fill's cost is the notional-weighted mean over slices;
+  `slippage_yield(sizes_usd, depth, ledger, years) -> float` — the engine's actual turnover
+  from 2023-01-01 priced at the reset-minute snapshots: one full `size_usd` fill at the first
+  reset in the depth period and at the end, plus `|Δq| × mark` at each other reset, each leg
+  (spot proxied by the perp book — spec 9), summed, `/ years / CAPITAL_MULT`;
   `capacity_curve(sizes: tuple[float, ...], base: Decomposition, kappa: float, oi, depth,
-  reset_ts, years: float) -> pl.DataFrame[size_usd, oi_share, funding_haircut_yield,
-  slippage_yield, modelled_spread]` where `modelled_spread = base.spread − haircut ×
-  PRINTS_PER_YEAR − slippage × 12` (monthly round trips);
+  ledger) -> pl.DataFrame[size_usd, oi_share, funding_haircut_yield, slippage_yield,
+  modelled_spread]` with `modelled_spread = base.spread − funding_haircut_yield −
+  slippage_yield`;
   `capacity_usd(curve, base) -> float | None` — smallest size where `modelled_spread ≤
-  CAPACITY_HALF × base.spread`, linear interpolation, `None` if never reached;
+  CAPACITY_HALF × base.spread`, linear interpolation, `None` if never reached **or if
+  `base.spread ≤ 0`** (half of nothing is not a capacity; the README says so);
   `SIZES = (1e6, 3e6, 1e7, 3e7, 1e8, 3e8, 1e9)`.
 
 - [ ] **Step 1: Write failing tests** `test_fit_kappa_recovers_slope_on_synthetic`
-  (ratio-driven funding with noise, slope within 2 stderr), `test_depth_cost_walks_levels`
-  (hand-built two-level book: exact expected slippage), `test_capacity_is_none_when_curve_flat`,
-  `test_capacity_interpolates_half_spread`.
+  (ratio-driven funding with noise, slope within 2 stderr), `test_depth_cost_within_band_is_
+  uniform` (hand-built two-band book: a fill consuming half of band 1 costs exactly `0.25 ×
+  pct_1`; a fill consuming all of band 1 and a quarter of band 2 costs the weighted mean),
+  `test_slippage_yield_uses_reset_turnover_not_full_round_trips`,
+  `test_units_are_fractions_of_capital` (haircut yield for `kappa=1e-4, s=0.01` equals
+  `1e-4 × log(1.02) × 1095 / 1.5`), `test_capacity_is_none_when_spread_nonpositive`,
+  `test_capacity_is_none_when_curve_flat`, `test_capacity_interpolates_half_spread`.
 
 - [ ] **Step 2–4: FAIL, implement (numpy `lstsq` for OLS), PASS. Step 5: Commit**
   `git commit -m "Capacity model: funding sensitivity and depth slippage"`
@@ -501,21 +592,30 @@ git add -A && git commit -m "Scaffold package, CI and atomic I/O"
   "FAIL"]; detail: str; numbers: dict[str, float | int]`;
   `check_d1_funding_complete(funding, start, end) -> CheckResult` (exactly 3 prints per day;
   lists missing);
-  `check_d2_mark_gaps(mark, start, end, max_gap_min: int = 60) -> CheckResult` (no gap longer
-  than `max_gap_min`; all gaps > 5 min listed in `numbers["gaps"]` count);
-  `check_d3_oi_daily(oi, start, end)` (at least one row per day);
+  `check_d2_mark_gaps(mark, start, end) -> CheckResult` (FAIL only on a gap longer than
+  `params.MARK_GAP_FAIL_MIN`; every gap longer than `params.MARK_GAP_LIST_MIN` is listed with
+  its start and length in `numbers` and `detail` — Binance maintenance windows of an hour or
+  more exist in the period and are tolerated, the engine handles them per Review Focus 1);
+  `check_d3_oi_daily(oi, start, end)` (lists missing days; FAIL if their share exceeds
+  `params.OI_MISSING_DAYS_MAX_SHARE`);
   `check_d4_tbill_covers(tbill, start, end)`;
   `check_e1_funding_total(ledger, bars)` (Σ `funding_usd` recomputed from `funding_rate ×
-  mark × qty` on the ledger's own `qty` equals the ledger's total exactly, `== 0.0` difference
-  after `math.fsum` on both sides);
+  previous bar's mark × perp_qty` on hedged bars equals the ledger's total exactly, `== 0.0`
+  difference after `math.fsum` on both sides; `perp_qty` is 0 while unhedged so liquidated
+  runs pass);
   `check_e2_rerun_identical(bars, setting, rules)` (two runs, identical parquet bytes);
+  `check_e3_cash_conservation(ledger)` (Task 7's identity on every bar, `|residual| < 1e-6
+  × notional`);
   `write_report(results: list[CheckResult], out_dir: Path, extra: dict[str, Any]) -> str`
   writing `data_validation/validation_report.json` and `.md` (Project 1's format);
   `require_pass(report_path: Path) -> None` raising `SystemExit` unless every status is PASS
   and the report's input hashes match the files on disk.
 - CLI: `pce fetch [--start YYYY-MM-DD] [--end YYYY-MM-DD]` (defaults: `PERIOD_START`, first
   day of the current month) → `fetch_all` + `fetch_dtb3`; `pce build` → `write_bars`;
-  `pce validate` → D1–D4 on raw, E1–E2 on the calibration window, report written.
+  `pce validate` → D1–D4 on raw, E1–E3 on the calibration window, report written.
+  `pce run` (Task 14) re-runs E1–E3 on the full-period primary ledger **before** writing any
+  result file (spec §11: checks pass before results are written), not only on the stored
+  calibration report.
 
 - [ ] **Step 1: Write failing tests** for each check with a passing and a failing fixture,
   `test_require_pass_refuses_fail`, `test_require_pass_refuses_changed_input_hash`, and
@@ -538,9 +638,15 @@ git add -A && git commit -m "Scaffold package, CI and atomic I/O"
   `freeze_payload(raw_dir: Path, period_end: date) -> dict[str, Any]` with keys:
   `"spec"` (path + `text_hash`), `"params"` (every constant in `params.py` by name, the
   grid as a list), `"rules"` (the asset JSON verbatim + its hash), `"period"` (`start`,
-  `end`, `calibration_end`), `"capacity_model"` (`"delta_funding ~ kappa * delta_log(top_ls_
-  position_ratio); position share s applied as -log(1+s) per print; depth walk at resets
-  from 2023-01-01, perp book as spot proxy"`), `"episode_rules"` (spec 8 text), `"prediction"`
+  `end`, `calibration_end`), `"capacity_model"` (`"delta_funding ~ kappa *
+  delta_log(sum_toptrader_long_short_ratio); a short of share s of OI shifts the ratio by
+  -log(1+2s) (top-trader shorts assumed half of OI); haircut = kappa*log(1+2s)*1095/1.5;
+  slippage from the engine's reset turnover priced on bookDepth snapshots from 2023-01-01,
+  uniform density within a band, perp book as spot proxy; all terms annualised fractions of
+  capital deployed (1.5 x notional)"`), `"liquidation_accounting"` (`"all remaining margin
+  equity is lost at liquidation, covering the clearance fee; conservative"`),
+  `"check_tolerances"` (the three `params` constants), `"episode_rules"` (spec 8 text),
+  `"prediction"`
   (`"cut filter does not beat hold-through on net spread after fees"`), `"input_hashes"`
   (`file_hash` of every raw file), `"written_at"` (date only);
   `write_freeze(path, payload)` (refuses if exists — Project 1's), `read_freeze(path,
@@ -572,9 +678,12 @@ git add -A && git commit -m "Scaffold package, CI and atomic I/O"
   variant of `hold_through_B`), `episodes.json`, `capacity.csv`, `negative_stretches.csv`,
   `summary.json` (every headline number, `worth_it`, `prediction_confirmed: bool` = filter
   spread ≤ hold-through spread, `kappa`, `capacity_usd`, period, run inputs' hashes).
+- `run_all` runs E1–E3 on `ledger_B_primary` and raises `SystemExit` before writing anything
+  if one fails; the summary records their numbers.
 - CLI: `pce run [--calibration]`: without the flag, `read_freeze` must succeed and the period
   is the frozen one, output `results/`; with it, the calibration window, output
-  `results/calibration/` (git-ignored), no freeze needed. Both call `require_pass` first.
+  `results/calibration/` (git-ignored), no freeze needed. Both call `require_pass` on the
+  stored data report first.
 - `tests/test_run.py::test_run_on_fixture_bars_writes_every_file` and
   `test_summary_is_byte_identical_on_rerun`.
 
@@ -613,9 +722,16 @@ git add -A && git commit -m "Scaffold package, CI and atomic I/O"
 - **Step scan:** each step names one file, signature or assertion; the only bodies given are
   Task 7's algorithm (not determined by its signature) and none elsewhere.
 - **Type consistency:** `MarginSetting` fields (`m0, trigger, tau_us, reserve_frac`) are used
-  by Tasks 7, 10, 12, 14 with those names; `Rules` methods `maintenance_rate`,
-  `round_trip_fee`, `vip_variant` by Tasks 7, 8, 14; ledger column names in Task 7 are the ones
-  Tasks 9, 10, 12 read.
+  by Tasks 7, 10, 12, 14 with those names; `Rules` methods `maintenance`, `round_trip_fee`,
+  `vip_variant` by Tasks 7, 8, 10, 14; ledger column names in Task 7 (`perp_qty`, `spot_qty`,
+  `spot_value_usd`, `funding_usd`, `missed_funding_usd`, `unhedged_pnl_usd`, `tbill_usd`,
+  `fee_usd`, `liq_loss_usd`, `sweep_usd`) are the ones Tasks 9, 10, 12 read.
+- **Plan review (2026-10-26):** a reviewer found a unit error in the capacity curve and
+  unpinned accounting in the engine; fixed by the cash-conservation rule and the exact tests in
+  Task 7, the maintenance amount in Task 5, the reserve-first re-establishment, re-hedging at
+  reset, the extra ledger columns, capacity in units of capital with slippage from actual
+  turnover, E1–E3 inside `pce run`, tolerant D2/D3 with frozen tolerances, and data checks at
+  the period start.
 - **Review Focus:** all five pinned to tests in Tasks 4, 6, 7.
 - **Proportion:** the plan is about the spec's length; only Task 7 carries an algorithm, and
   the spec does not determine it from the signature alone.
