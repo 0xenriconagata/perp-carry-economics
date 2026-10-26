@@ -62,6 +62,14 @@ def test_payload_has_every_key_and_the_frozen_texts(raw):
     assert "2. **The inversion week:**" in p["episode_rules"]
     assert "## 9" not in p["episode_rules"]
     assert p["prediction"] == "cut filter does not beat hold-through on net spread after fees"
+    assert p["period_end_exclusive"] == "period.end is exclusive: the run covers [start, end)"
+    assert p["seed_funding"] == "the seed bar pays no funding; the first print after it does"
+    assert p["tbill"].startswith("FRED DTB3 percent / 100 used as-is (discount basis)")
+    assert "below economic break-even (~1.25x T-bill)" in p["filter_breakeven_note"]
+    assert "every bar with a perp trade plus the open and close" in p["capacity_model"]
+    assert "reset turnover" not in p["capacity_model"]
+    assert p["capacity_rule"].startswith("capacity = smallest size at which the modelled spread")
+    assert all(isinstance(p[k], str) and p[k] for k in freeze._TEXTS)
     assert p["written_at"] == date.today().isoformat()
 
 

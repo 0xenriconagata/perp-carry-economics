@@ -23,8 +23,11 @@ FREEZE_KEYS = (
     "rules",
     "dtb3",
     "period",
+    "period_end_exclusive",
     "capital",
     "seed",
+    "seed_funding",
+    "tbill",
     "liquidation_accounting",
     "capacity_model",
     "capacity_rule",
@@ -32,6 +35,7 @@ FREEZE_KEYS = (
     "kappa_fit",
     "slippage",
     "filter",
+    "filter_breakeven_note",
     "check_tolerances",
     "episode_rules",
     "prediction",
@@ -40,6 +44,14 @@ FREEZE_KEYS = (
 )
 
 _TEXTS = {
+    "period_end_exclusive": "period.end is exclusive: the run covers [start, end)",
+    "tbill": "FRED DTB3 percent / 100 used as-is (discount basis), accrued on idle cash at "
+    "rate/365 on each day_start bar",
+    "seed_funding": "the seed bar pays no funding; the first print after it does",
+    "filter_breakeven_note": "under the primary setting a hedged book earns funding on N plus "
+    "T-bill on 0.25N while a flat book earns T-bill on 1.5N, so the spec's threshold (trailing "
+    "funding vs T-bill) is below economic break-even (~1.25x T-bill); the spec's rule is kept "
+    "as pre-registered",
     "capital": "(1 + m0 + reserve_frac) x notional per setting; 1.5 x notional at the primary "
     "setting",
     "seed": "both legs opened at N / mark on the first bar; funding starts at the first print "
@@ -48,9 +60,10 @@ _TEXTS = {
     "(covers the clearance fee); liquidation is checked intrabar on the mark high; conservative",
     "capacity_model": "delta_funding ~ kappa * delta_log(sum_toptrader_long_short_ratio); a "
     "short of share s of OI shifts the ratio by -log(1+2s) (top-trader shorts assumed half of "
-    "OI); haircut = kappa*log(1+2s)*1095/1.5; slippage from the engine's reset turnover priced "
-    "on bookDepth snapshots from 2023-01-01, uniform density within a band, perp book as spot "
-    "proxy; all terms annualised fractions of capital deployed (1.5 x notional)",
+    "OI); haircut = kappa*log(1+2s)*1095/1.5; slippage from every bar with a perp trade plus "
+    "the open and close priced on bookDepth snapshots from 2023-01-01, uniform density within a "
+    "band, perp book as spot proxy; all terms annualised fractions of capital deployed "
+    "(1.5 x notional)",
     "capacity_rule": "capacity = smallest size at which the modelled spread falls to "
     "CAPACITY_HALF x the modelled spread at size == notional (the 1e7 grid point), linear "
     "interpolation between grid sizes; the smallest size whose fill exceeds the published book "
