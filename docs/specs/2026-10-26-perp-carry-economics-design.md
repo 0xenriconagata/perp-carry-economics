@@ -1,6 +1,6 @@
 # perp-carry-economics — design
 
-Date: 2026-10-26. Status: approved design, not yet planned.
+Date: 2026-10-26. Status: approved design; amended as built (section 15).
 
 ## 1. Intent
 
@@ -259,3 +259,30 @@ as author; no AI attribution in commits. Package `perp_carry_economics`, CLI ent
 Module layout; the exact regression specification for the funding-impact model (frozen at
 step 3, not here); how the maintenance-margin tier table is encoded; the calibration window
 length; chart design; the repo map and badges.
+
+## 15. Amendments (as built, 2026-10-26)
+
+Where the engine differs from or makes precise the sections above, it does this. The sections
+above are left as approved.
+
+- [§5] Liquidation is checked intrabar on the mark high, and all remaining margin equity at the
+  liquidation mark m_liq is lost; the clearance fee is inside that loss, so `liquidation_fee`
+  in the rules snapshot is unused.
+- [§5] Re-establishment after τ posts m0 of the new short's notional from the reserve first,
+  then by selling spot, solved jointly so that spot and short quantities match afterwards.
+- [§5] A month-start reset re-hedges a liquidated book even inside τ.
+- [§5/§7] The seed opens both legs at N / mark on the first bar.
+- [§7] Sensitivity rows are measured on their own setting's capital, `(1 + m0 + reserve_frac)
+  · N`; the headline rows on 1.5N.
+- [§7] Net yield is the sum of the monthly sweeps over capital, so it includes realised basis
+  and unhedged P&L; both are reported.
+- [§9] Funding impact is regressed on Δlog of the top-trader long/short *position* ratio, and a
+  short of share s of OI shifts it by −log(1 + 2s).
+- [§9] Slippage prices every perp trade plus the open and close, both legs on the perp book.
+- [§9] The capacity target is half the modelled spread at $10M (the grid point equal to the
+  notional), capped by the smallest size that exhausts the published book.
+- [§8] The closest call is the maximum per-bar score over bars with a top-up pending or
+  landing.
+- [§11] D2 tolerates mark gaps up to 24 h (and lists gaps of 5 min or more), D3 tolerates up to
+  2 % missing OI days (listed), and E1 recomputes funding from the bar table.
+- [§10] DTB3 is pinned in `assets/DTB3.csv` at freeze; `pce fetch` takes it from there.
