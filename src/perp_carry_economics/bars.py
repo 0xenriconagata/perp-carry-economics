@@ -5,8 +5,9 @@ from pathlib import Path
 
 import polars as pl
 
-from perp_carry_economics.config import DAY_US
+from perp_carry_economics.config import DAY_US, US
 from perp_carry_economics.io import write_parquet_atomic
+from perp_carry_economics.params import MARK_GAP_FAIL_MIN
 
 _EPOCH = date(1970, 1, 1)
 
@@ -35,22 +36,31 @@ def build_bars(
 
     Spot is as-of joined backward. Each funding print lands on the last bar at or before its
     time (its own minute normally), so exactly one bar carries it. `tbill_rate` is that
-    calendar day's rate."""
+    calendar day's rate. A funding payment is never dropped or merged: it raises ValueError if a
+    print has no bar at or before it, shares its bar with another print, or lands more than
+    MARK_GAP_FAIL_MIN minutes before its time.
+
+    `month_start` and `day_start` are True on the first bar by design: the engine seeds there
+    and resets only on later month starts."""
     lo, hi = (start - _EPOCH).days * DAY_US, (end - _EPOCH).days * DAY_US
     bars = (
         mark.filter(pl.col("ts_us").is_between(lo, hi, closed="left"))
         .sort("ts_us")
         .select("ts_us", mark=pl.col("close"), mark_high=pl.col("high"))
     )
-    prints = (
+    landed = (
         funding.filter(pl.col("ts_us").is_between(lo, hi, closed="left"))
         .sort("ts_us")
         .join_asof(bars.select("ts_us", bar_ts=pl.col("ts_us")), on="ts_us", strategy="backward")
-        .drop_nulls("bar_ts")  # a print before the first bar has no bar to land on
-        .group_by("bar_ts", maintain_order=True)
-        .agg(pl.col("rate").last())
-        .select(ts_us="bar_ts", funding_rate="rate")
     )
+    bad = landed.filter(
+        pl.col("bar_ts").is_null()  # no bar at or before the print
+        | pl.col("bar_ts").is_duplicated()  # two prints share one bar
+        | (pl.col("ts_us") - pl.col("bar_ts") > MARK_GAP_FAIL_MIN * 60 * US)  # landed far too late
+    )
+    if bad.height:
+        raise ValueError(f"funding prints cannot land on one bar each: {bad['ts_us'].to_list()}")
+    prints = landed.select(ts_us="bar_ts", funding_rate="rate")
     days = tbill.select(day_n=pl.col("day").to_physical().cast(pl.Int64), tbill_rate=pl.col("rate"))
     out = (
         bars.join_asof(spot.sort("ts_us").select("ts_us", spot=pl.col("close")), on="ts_us")

@@ -121,3 +121,23 @@ def test_write_read_roundtrip(tmp_path):
 def test_missing_tbill_day_raises():
     with pytest.raises(ValueError, match="T-bill"):
         build_bars(_klines(_minutes()), _klines(_minutes()), NO_FUNDING, _tbill().head(2), D0, END)
+
+
+def test_colliding_prints_raise_naming_both():
+    p1, p2 = T0 + 8 * 60 * MIN_US, T0 + 16 * 60 * MIN_US
+    gap = {t for t in _minutes() if T0 + 7 * 60 * MIN_US <= t < T0 + 17 * 60 * MIN_US}
+    with pytest.raises(ValueError, match=rf"{p1}.*{p2}"):
+        _build(mark_ts=_minutes(skip=gap), funding=_prints((p1, 0.0001), (p2, 0.0002)))
+
+
+def test_print_before_first_bar_raises():
+    p = T0 + 60 * MIN_US
+    with pytest.raises(ValueError, match=str(p)):
+        _build(mark_ts=_minutes()[120:], funding=_prints((p, 0.0001)))
+
+
+def test_print_landing_25h_late_raises():
+    p = T0 + 26 * 60 * MIN_US
+    gap = {t for t in _minutes() if T0 + 60 * MIN_US < t <= p}
+    with pytest.raises(ValueError, match=str(p)):
+        _build(mark_ts=_minutes(skip=gap), funding=_prints((p, 0.0001)))
