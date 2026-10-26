@@ -26,16 +26,20 @@ def _csv_path(raw_dir: Path) -> Path:
 def fetch_dtb3(raw_dir: Path) -> Path:
     """Download the full DTB3 history to raw_dir/fred/DTB3.csv and record its SHA-256 next to it.
 
-    FRED publishes no checksum, so the hash is recorded, not verified. The file is replaced on
-    every call: the series is revised and extended daily.
+    FRED publishes no checksum, so the hash is recorded, not verified. A file already on disk is
+    kept as it is (no request): the pre-registration freeze hashes every raw input, and FRED
+    revises and extends the series. To refresh on purpose, delete the file by hand.
     """
     dest = _csv_path(raw_dir)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_name(dest.name + ".part")
-    with httpx.Client(timeout=120, follow_redirects=True) as client:
-        tmp.write_bytes(client.get(DTB3_URL).raise_for_status().content)
-    tmp.replace(dest)
-    write_text_atomic(dest.with_name(dest.name + ".sha256"), file_hash(dest) + "\n")
+    if not dest.exists():
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_name(dest.name + ".part")
+        with httpx.Client(timeout=120, follow_redirects=True) as client:
+            tmp.write_bytes(client.get(DTB3_URL).raise_for_status().content)
+        tmp.replace(dest)
+    sidecar = dest.with_name(dest.name + ".sha256")
+    if not sidecar.exists():
+        write_text_atomic(sidecar, file_hash(dest) + "\n")
     return dest
 
 

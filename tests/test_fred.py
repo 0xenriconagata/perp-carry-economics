@@ -1,9 +1,11 @@
 from datetime import date
 
+import httpx
 import polars as pl
 from pytest import approx
 
-from perp_carry_economics.data.fred import load_tbill
+from perp_carry_economics.data.fred import DTB3_URL, fetch_dtb3, load_tbill
+from perp_carry_economics.io import file_hash
 
 
 def _write(tmp_path, header="observation_date,DTB3"):
@@ -34,3 +36,28 @@ def test_load_tbill_back_fills_before_first_print(tmp_path):
     _write(tmp_path)
     df = load_tbill(tmp_path, date(2024, 1, 3), date(2024, 1, 6))
     assert df["rate"].to_list() == approx([0.0525] * 3)
+
+
+def test_fetch_dtb3_keeps_existing_file_and_makes_no_request(tmp_path, monkeypatch):
+    bodies = [b"observation_date,DTB3\n2024-01-05,5.25\n", b"revised\n"]
+    urls = []
+
+    def handler(request):
+        urls.append(str(request.url))
+        return httpx.Response(200, content=bodies[len(urls) - 1])
+
+    real_client = httpx.Client
+    monkeypatch.setattr(
+        httpx, "Client", lambda **kw: real_client(transport=httpx.MockTransport(handler), **kw)
+    )
+    path = fetch_dtb3(tmp_path)
+    assert urls == [DTB3_URL]
+    assert path.read_bytes() == bodies[0]
+    sidecar = path.with_name("DTB3.csv.sha256")
+    assert sidecar.read_text().strip() == file_hash(path)
+
+    sidecar.unlink()  # a missing sidecar is rewritten from the file, still without a request
+    assert fetch_dtb3(tmp_path) == path
+    assert urls == [DTB3_URL]
+    assert path.read_bytes() == bodies[0]
+    assert sidecar.read_text().strip() == file_hash(path)
