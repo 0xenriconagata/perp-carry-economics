@@ -130,6 +130,18 @@ def test_colliding_prints_raise_naming_both():
         _build(mark_ts=_minutes(skip=gap), funding=_prints((p1, 0.0001), (p2, 0.0002)))
 
 
+@pytest.mark.parametrize("leg", ["mark", "spot"])
+def test_duplicated_minute_raises_naming_it(leg):
+    twice = _minutes() + [T0 + 5 * MIN_US]  # Binance's 2020-09-01 metrics had every row twice
+    with pytest.raises(ValueError, match=rf"{leg} has duplicated ts_us: \[{T0 + 5 * MIN_US}\]"):
+        _build(**{f"{leg}_ts": twice})
+
+
+def test_duplicate_outside_the_window_is_ignored():
+    before = T0 - MIN_US
+    assert _build(mark_ts=[before, before, *_minutes()]).height == 3 * 1440
+
+
 def test_print_before_first_bar_raises():
     p = T0 + 60 * MIN_US
     with pytest.raises(ValueError, match=str(p)):

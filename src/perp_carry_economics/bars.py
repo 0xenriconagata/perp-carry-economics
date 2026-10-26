@@ -38,11 +38,16 @@ def build_bars(
     time (its own minute normally), so exactly one bar carries it. `tbill_rate` is that
     calendar day's rate. A funding payment is never dropped or merged: it raises ValueError if a
     print has no bar at or before it, shares its bar with another print, or lands more than
-    MARK_GAP_FAIL_MIN minutes before its time.
+    MARK_GAP_FAIL_MIN minutes before its time. A `ts_us` that appears twice in mark or spot
+    inside the window raises ValueError too: a duplicated mark bar would pay a print twice.
 
     `month_start` and `day_start` are True on the first bar by design: the engine seeds there
     and resets only on later month starts."""
     lo, hi = (start - _EPOCH).days * DAY_US, (end - _EPOCH).days * DAY_US
+    for name, df in (("mark", mark), ("spot", spot)):
+        ts = df.filter(pl.col("ts_us").is_between(lo, hi, closed="left"))["ts_us"]
+        if dup := ts.filter(ts.is_duplicated()).unique().sort().to_list():
+            raise ValueError(f"{name} has duplicated ts_us: {dup}")
     bars = (
         mark.filter(pl.col("ts_us").is_between(lo, hi, closed="left"))
         .sort("ts_us")
