@@ -27,6 +27,7 @@ FREEZE_KEYS = (
     "seed",
     "liquidation_accounting",
     "capacity_model",
+    "capacity_rule",
     "closest_call_rule",
     "kappa_fit",
     "slippage",
@@ -50,6 +51,10 @@ _TEXTS = {
     "OI); haircut = kappa*log(1+2s)*1095/1.5; slippage from the engine's reset turnover priced "
     "on bookDepth snapshots from 2023-01-01, uniform density within a band, perp book as spot "
     "proxy; all terms annualised fractions of capital deployed (1.5 x notional)",
+    "capacity_rule": "capacity = smallest size at which the modelled spread falls to "
+    "CAPACITY_HALF x the modelled spread at size == notional (the 1e7 grid point), linear "
+    "interpolation between grid sizes; the smallest size whose fill exceeds the published book "
+    "caps it; None if the reference spread <= 0",
     "closest_call_rule": "max over candidate bars (top-up pending or landing) of (trigger - "
     "margin_frac) / (trigger - maintenance_frac at that bar); same score over all hedged bars "
     "when no top-up was ever pending",

@@ -1,5 +1,5 @@
 from perp_carry_economics import params as p
-from perp_carry_economics.config import HOUR_US
+from perp_carry_economics.config import HOUR_US, US
 
 
 def test_scalar_constants():
@@ -16,6 +16,9 @@ def test_scalar_constants():
     assert p.FILTER_PRINTS == 21
     assert p.HURDLE_AMORTISE_DAYS == 30
     assert p.CAPACITY_HALF == 0.5
+    assert p.SIZES == (1e6, 3e6, 1e7, 3e7, 1e8, 3e8, 1e9)
+    assert p.OI_FRESH_US == 600 * US
+    assert p.PRINT_GAP_TOL_US == 60 * US
     assert p.PRINTS_PER_DAY == 3
     assert p.PRINTS_PER_YEAR == 365 * 3
     assert p.MARK_GAP_FAIL_MIN == 24 * 60

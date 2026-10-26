@@ -6,7 +6,6 @@ import polars as pl
 import pytest
 
 from perp_carry_economics.capacity import (
-    SIZES,
     capacity_curve,
     capacity_usd,
     depth_cost,
@@ -17,6 +16,7 @@ from perp_carry_economics.capacity import (
 from perp_carry_economics.carry.book import LEDGER_SCHEMA
 from perp_carry_economics.carry.yields import Decomposition
 from perp_carry_economics.config import DAY_US, HOUR_US, US
+from perp_carry_economics.params import NOTIONAL_USD, SIZES
 
 ZERO = Decomposition(*[0.0] * len(dataclasses.fields(Decomposition)))
 
@@ -42,6 +42,7 @@ def ledger(rows: list[tuple[int, float, float]]) -> pl.DataFrame:
 
 def test_sizes_grid():
     assert SIZES == (1e6, 3e6, 1e7, 3e7, 1e8, 3e8, 1e9)
+    assert NOTIONAL_USD in SIZES  # the capacity reference is a grid point
 
 
 N_PRINTS, KAPPA = 500, 2e-4
@@ -218,35 +219,53 @@ def test_capacity_curve_marks_exhausted_book_and_capacity_is_that_size():
     assert c["book_exhausted"].to_list() == [False, True]
     assert c["slippage_yield"][1] is None and c["modelled_spread"][1] is None
     assert c["modelled_spread"][0] > 0.025  # the half-spread is never crossed
-    assert capacity_usd(c, base(0.05)) == 1e9
+    assert capacity_usd(c) == 1e9
 
 
 def curve(modelled: list[float | None], exhausted: list[bool] | None = None) -> pl.DataFrame:
+    """Grid 1e6, 1e7 (the default notional, so the reference), 1e8, 1e9."""
     return pl.DataFrame(
         {
-            "size_usd": [1e6, 1e7, 1e8],
+            "size_usd": [1e6, 1e7, 1e8, 1e9],
             "modelled_spread": modelled,
-            "book_exhausted": exhausted or [False] * 3,
+            "book_exhausted": exhausted or [False] * 4,
         }
     )
 
 
-def test_capacity_is_none_when_spread_nonpositive():
-    assert capacity_usd(curve([-0.02, -0.03, -0.04]), base(-0.01)) is None
-    assert capacity_usd(curve([-0.02, -0.03, None], [False, False, True]), base(0.0)) is None
+def test_capacity_is_none_when_reference_spread_nonpositive():
+    assert capacity_usd(curve([0.01, -0.03, -0.04, -0.05])) is None
+    assert capacity_usd(curve([0.01, 0.0, -0.01, None], [False, False, False, True])) is None
 
 
 def test_capacity_is_none_when_curve_flat():
-    assert capacity_usd(curve([0.04, 0.04, 0.04]), base(0.04)) is None
+    assert capacity_usd(curve([0.04, 0.04, 0.04, 0.04])) is None
 
 
-def test_capacity_interpolates_half_spread():
-    # half of 0.04 is 0.02, halfway from 0.03 at 1e7 to 0.01 at 1e8
-    assert capacity_usd(curve([0.039, 0.03, 0.01]), base(0.04)) == pytest.approx(5.5e7)
+def test_capacity_target_is_half_the_modelled_spread_at_notional():
+    # reference 0.04 at 1e7 (not the 0.05 at 1e6): target 0.02, 2/3 of the way to 0.01 at 1e8
+    got = capacity_usd(curve([0.05, 0.04, 0.01, 0.0]))
+    assert got == pytest.approx(1e7 + (0.04 - 0.02) / (0.04 - 0.01) * 9e7)
     # at or below half already at the first grid point: that point
-    assert capacity_usd(curve([0.02, 0.01, 0.0]), base(0.04)) == pytest.approx(1e6)
+    assert capacity_usd(curve([0.02, 0.04, 0.0, 0.0])) == pytest.approx(1e6)
+    # the reference follows notional
+    assert capacity_usd(curve([0.05, 0.04, 0.03, 0.0]), notional=1e8) == pytest.approx(
+        1e8 + (0.03 - 0.015) / 0.03 * 9e8
+    )
 
 
 def test_capacity_crossing_before_exhausted_book_wins():
-    got = capacity_usd(curve([0.039, 0.01, None], [False, False, True]), base(0.04))
-    assert got == pytest.approx(1e6 + (0.039 - 0.02) / (0.039 - 0.01) * 9e6)
+    got = capacity_usd(curve([0.05, 0.04, 0.01, None], [False, False, False, True]))
+    assert got == pytest.approx(1e7 + (0.04 - 0.02) / (0.04 - 0.01) * 9e7)
+
+
+def test_capacity_is_capped_by_the_smallest_exhausted_size():
+    got = capacity_usd(curve([0.05, 0.04, None, None], [False, False, True, True]))
+    assert got == 1e8
+    # a reference the book cannot fill leaves only the cap
+    assert capacity_usd(curve([0.05, None, None, None], [False, True, True, True])) == 1e7
+
+
+def test_capacity_refuses_a_notional_off_the_grid():
+    with pytest.raises(ValueError, match="not a capacity grid size"):
+        capacity_usd(curve([0.05, 0.04, 0.01, 0.0]), notional=5e6)

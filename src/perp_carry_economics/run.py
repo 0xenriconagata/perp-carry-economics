@@ -11,7 +11,7 @@ from typing import Any
 import polars as pl
 
 from perp_carry_economics import checks
-from perp_carry_economics.capacity import SIZES, capacity_curve, capacity_usd, fit_kappa
+from perp_carry_economics.capacity import capacity_curve, capacity_usd, fit_kappa
 from perp_carry_economics.carry.book import Mode, run_book
 from perp_carry_economics.carry.filter import filter_signal, negative_stretches
 from perp_carry_economics.carry.yields import decompose, worth_it
@@ -19,7 +19,7 @@ from perp_carry_economics.config import HOUR_US
 from perp_carry_economics.data.rules import Rules
 from perp_carry_economics.episodes import inversion_week, liquidation_week, week_slice
 from perp_carry_economics.io import write_parquet_atomic, write_text_atomic
-from perp_carry_economics.params import NOTIONAL_USD, PRIMARY, MarginSetting
+from perp_carry_economics.params import NOTIONAL_USD, PRIMARY, SIZES, MarginSetting
 
 ROWS = ("hold_through_B", "one_account_A", "cut_filter", "hold_through_B_vip")
 LEDGER_FILES = {
@@ -160,7 +160,7 @@ def run_all(
             "kappa_stderr": kappa_stderr,
             "kappa_n": kappa_n,
             "capacity_depth_available": depth_available,
-            "capacity_usd": capacity_usd(curve, base) if depth_available else None,
+            "capacity_usd": capacity_usd(curve, notional) if depth_available else None,
             "book_exhausted_at_any_size": bool(curve["book_exhausted"].any()),
             "negative_stretches": {
                 "count": len(lengths),

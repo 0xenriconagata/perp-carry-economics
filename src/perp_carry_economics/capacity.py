@@ -19,16 +19,16 @@ import numpy as np
 import polars as pl
 
 from perp_carry_economics.carry.yields import Decomposition
-from perp_carry_economics.config import DAY_US, US
+from perp_carry_economics.config import DAY_US
 from perp_carry_economics.params import (
     CAPACITY_HALF,
     NOTIONAL_USD,
+    OI_FRESH_US,
+    PRINT_GAP_TOL_US,
     PRINTS_PER_DAY,
     PRINTS_PER_YEAR,
 )
 
-SIZES: tuple[float, ...] = (1e6, 3e6, 1e7, 3e7, 1e8, 3e8, 1e9)
-OI_FRESH_US = 10 * 60 * US  # an OI sample older than this at a print is no sample
 PRINT_US = DAY_US // PRINTS_PER_DAY
 
 
@@ -56,7 +56,7 @@ def fit_kappa(funding: pl.DataFrame, oi: pl.DataFrame) -> tuple[float, float, in
             dx=pl.col("top_ls_position_ratio").log().diff(),
         )
         .filter(
-            ((pl.col("gap") - PRINT_US).abs() <= 60 * US)
+            ((pl.col("gap") - PRINT_US).abs() <= PRINT_GAP_TOL_US)
             & pl.col("dr").is_finite()
             & pl.col("dx").is_finite()
         )
@@ -205,17 +205,22 @@ def capacity_curve(
     )
 
 
-def capacity_usd(curve: pl.DataFrame, base: Decomposition) -> float | None:
-    """The smaller of the smallest size where modelled_spread <= CAPACITY_HALF x base.spread
-    (linear between grid points; the first grid point if it is already there) and the smallest
-    size that exhausts the published book (capacity is at most that). None if neither occurs or
-    if base.spread <= 0 (half of nothing is not a capacity)."""
-    if base.spread <= 0:
+def capacity_usd(curve: pl.DataFrame, notional: float = NOTIONAL_USD) -> float | None:
+    """The smaller of the smallest size where modelled_spread <= CAPACITY_HALF x the modelled
+    spread at size == notional, the reference (linear between grid points; the first grid point
+    if it is already there), and the smallest size that exhausts the published book (capacity
+    is at most that). None if neither occurs or if the reference is <= 0 (half of nothing is
+    not a capacity). A reference the book cannot fill leaves only the exhaustion cap. Raises
+    ValueError if notional is not a grid size."""
+    if notional not in curve["size_usd"].to_list():
+        raise ValueError(f"notional {notional:,.0f} is not a capacity grid size")
+    ref = curve.filter(pl.col("size_usd") == notional)["modelled_spread"][0]
+    if ref is not None and ref <= 0:
         return None
     caps = curve.filter(pl.col("book_exhausted"))["size_usd"].to_list()
-    target = CAPACITY_HALF * base.spread
     rows = curve.filter(~pl.col("book_exhausted")).select("size_usd", "modelled_spread").rows()
-    for i, (s, v) in enumerate(rows):
+    target = CAPACITY_HALF * ref if ref is not None else None
+    for i, (s, v) in enumerate(rows if target is not None else []):
         if v <= target:
             if i:
                 s0, v0 = rows[i - 1]

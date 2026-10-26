@@ -6,7 +6,7 @@ else; a change to a value must show in tests/test_params.py.
 
 from dataclasses import dataclass
 
-from perp_carry_economics.config import HOUR_US
+from perp_carry_economics.config import HOUR_US, US
 
 # Spec 7: position size and the primary margin setting. Capital = spot leg + initial margin
 # + reserve (CAPITAL_MULT x notional).
@@ -29,6 +29,13 @@ FILTER_PRINTS = 21
 # Spec 7/9: hurdle amortisation window and the capacity share.
 HURDLE_AMORTISE_DAYS = 30
 CAPACITY_HALF = 0.5
+
+# Spec 9: the capacity grid (must contain NOTIONAL_USD, the reference size) and the kappa fit's
+# sampling: an OI sample older than OI_FRESH_US at a print is no sample; consecutive prints
+# count as one print apart when 8 h +- PRINT_GAP_TOL_US apart.
+SIZES: tuple[float, ...] = (1e6, 3e6, 1e7, 3e7, 1e8, 3e8, 1e9)
+OI_FRESH_US = 10 * 60 * US
+PRINT_GAP_TOL_US = 60 * US
 
 # Spec 4: funding is paid every 8 hours.
 PRINTS_PER_DAY = 3
