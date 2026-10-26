@@ -164,7 +164,13 @@ def cli_env(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "RESULTS_DIR", tmp_path / "results")
     monkeypatch.setattr(freeze, "FREEZE_PATH", tmp_path / "results" / "carry_freeze.json")
     monkeypatch.setattr(cli, "input_hashes", lambda raw: {"f": "h"})
-    monkeypatch.setattr(cli, "require_pass", lambda p: calls.setdefault("require_pass", p))
+    calls["report"] = {"period": "[2024-01-01, 2024-01-02)"}
+
+    def require_pass(p):
+        calls["require_pass"] = p
+        return calls["report"]
+
+    monkeypatch.setattr(cli, "require_pass", require_pass)
     monkeypatch.setattr(cli, "text_hash", lambda p: "fh")
     monkeypatch.setattr(cli, "read_bars", lambda d: bars)
     monkeypatch.setattr(cli, "load_rules", lambda: RULES)
@@ -210,7 +216,19 @@ def test_cli_run_refuses_bars_that_stop_before_the_period_ends(cli_env, monkeypa
     _, calls = cli_env
     period = {"period": {"start": "2024-01-01", "end": "2024-01-03"}}
     monkeypatch.setattr(freeze, "read_freeze", lambda path, hashes: period)
+    calls["report"] = {"period": "[2024-01-01, 2024-01-03)"}
     with pytest.raises(SystemExit, match="2024-01-01 to 2024-01-01"):
+        cli.main(["run"])
+    assert "run_all" not in calls
+
+
+def test_cli_run_refuses_a_validation_report_for_another_period(cli_env):
+    _, calls = cli_env
+    calls["report"] = {"period": "[2024-01-01, 2024-02-01)"}
+    with pytest.raises(
+        SystemExit,
+        match=r"covers \[2024-01-01, 2024-02-01\), not the period \[2024-01-01, 2024-01-02\)",
+    ):
         cli.main(["run"])
     assert "run_all" not in calls
 

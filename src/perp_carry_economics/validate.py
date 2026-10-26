@@ -40,12 +40,13 @@ def write_report(results: list[CheckResult], out_dir: Path, extra: dict[str, Any
     return status
 
 
-def require_pass(report_path: Path, raw_dir: Path | None = None) -> None:
-    """Refuse (SystemExit) unless every check passed on exactly the raw files now on disk."""
+def require_pass(report_path: Path, raw_dir: Path | None = None) -> dict[str, Any]:
+    """Refuse (SystemExit) unless every check passed on exactly the raw files now on disk;
+    return the report."""
     raw_dir = config.RAW_DIR if raw_dir is None else raw_dir
     if not report_path.exists():
         raise SystemExit(f"{report_path} missing; run `pce validate` first")
-    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report: dict[str, Any] = json.loads(report_path.read_text(encoding="utf-8"))
     failed = [c["name"] for c in report["checks"] if c["status"] != "PASS"]
     if failed or report["status"] != "PASS" or not report["checks"]:
         raise SystemExit(f"validation did not pass ({', '.join(failed)}); see {report_path}")
@@ -58,3 +59,4 @@ def require_pass(report_path: Path, raw_dir: Path | None = None) -> None:
             f"raw files changed since validation ({listed or 'no hashes recorded'}); "
             "run `pce validate` again"
         )
+    return report

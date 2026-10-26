@@ -170,6 +170,30 @@ def test_freeze_cli_refuses_unverified_rules(cli_env):
     assert not freeze.FREEZE_PATH.exists()
 
 
+@pytest.mark.parametrize("end", ["2026-09-15", "2020-12-01", "2020-11-01", "2999-01-01"])
+def test_freeze_cli_refuses_a_period_end_that_is_not_a_published_month_start(cli_env, end):
+    _rules(True)
+    with pytest.raises(SystemExit, match=f"--period-end {end} must be the first day of a month"):
+        cli.main(["freeze", "--period-end", end])
+    assert not freeze.FREEZE_PATH.exists()
+
+
+def _passing_report(cli_env, period):
+    report = cli_env / "data_validation" / "validation_report.json"
+    report.parent.mkdir()
+    ok = {"status": "PASS", "checks": [{"name": "D1", "status": "PASS"}]}
+    hashes = input_hashes(cli_env / "raw")
+    report.write_text(json.dumps({**ok, "period": period, "input_hashes": hashes}))
+
+
+def test_freeze_cli_refuses_a_validation_report_for_another_period(cli_env):
+    _rules(True)
+    _passing_report(cli_env, "[2020-09-01, 2026-08-01)")
+    with pytest.raises(SystemExit, match=r"covers \[2020-09-01, 2026-08-01\), not the period"):
+        cli.main(["freeze", "--period-end", "2026-09-01"])
+    assert not freeze.FREEZE_PATH.exists() and not fred.ASSET_PATH.exists()
+
+
 def test_freeze_cli_refuses_failed_validation(cli_env):
     _rules(True)
     with pytest.raises(SystemExit, match="validate"):  # no report on disk
@@ -184,10 +208,7 @@ def test_freeze_cli_refuses_failed_validation(cli_env):
 
 def test_freeze_cli_writes_pins_dtb3_and_prints_next_step(cli_env, capsys):
     _rules(True)
-    report = cli_env / "data_validation" / "validation_report.json"
-    report.parent.mkdir()
-    ok = {"status": "PASS", "checks": [{"name": "D1", "status": "PASS"}]}
-    report.write_text(json.dumps({**ok, "input_hashes": input_hashes(cli_env / "raw")}))
+    _passing_report(cli_env, "[2020-09-01, 2026-09-01)")
     cli.main(["freeze", "--period-end", "2026-09-01"])
     frozen = json.loads(freeze.FREEZE_PATH.read_text(encoding="utf-8"))
     assert fred.ASSET_PATH.read_bytes() == (cli_env / "raw" / "fred" / "DTB3.csv").read_bytes()

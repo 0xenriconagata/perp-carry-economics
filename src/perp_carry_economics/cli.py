@@ -5,6 +5,7 @@ import json
 import shutil
 from collections.abc import Callable
 from datetime import date, timedelta
+from typing import Any
 
 import polars as pl
 
@@ -104,19 +105,36 @@ def validate(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+def _require_period(report: dict[str, Any], start: date, end: date) -> None:
+    """Refuse unless the validation report was written for exactly [start, end)."""
+    want = f"[{start}, {end})"
+    if report.get("period") != want:
+        raise SystemExit(
+            f"the validation report covers {report.get('period')}, not the period {want}; "
+            f"run `pce fetch`, `pce build` and `pce validate` with --end {end}"
+        )
+
+
 def _freeze_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--period-end", type=date.fromisoformat, required=True)
 
 
 def freeze_cmd(args: argparse.Namespace) -> None:
     """write the pre-registration freeze (once) after the rule snapshot and validation pass"""
+    end, latest = args.period_end, default_end(date.today())
+    if end.day != 1 or not CALIBRATION_END < end <= latest:
+        raise SystemExit(
+            f"--period-end {end} must be the first day of a month, after {CALIBRATION_END} "
+            f"and no later than {latest} (exclusive end: the last full month is in)"
+        )
     if json.loads(freeze.RULES_PATH.read_text(encoding="utf-8")).get("verified") is not True:
         raise SystemExit(
             f"{freeze.RULES_PATH} has verified: false; verify the fee/tier snapshot and set "
             "verified to true yourself first"
         )
-    require_pass(config.VALIDATION_DIR / "validation_report.json")
-    freeze.write_freeze(freeze.FREEZE_PATH, freeze.freeze_payload(config.RAW_DIR, args.period_end))
+    report = require_pass(config.VALIDATION_DIR / "validation_report.json")
+    _require_period(report, PERIOD_START, end)
+    freeze.write_freeze(freeze.FREEZE_PATH, freeze.freeze_payload(config.RAW_DIR, end))
     # pin the series just hashed: FRED revises DTB3, so a later download would not match
     shutil.copyfile(config.RAW_DIR / "fred" / "DTB3.csv", fred.ASSET_PATH)
     print(
@@ -133,7 +151,7 @@ def _run_args(p: argparse.ArgumentParser) -> None:
 def run_cmd(args: argparse.Namespace) -> None:
     """run every row, setting, episode and the capacity curve; write results/ (needs the
     freeze) or, with --calibration, results/calibration/ on the calibration window"""
-    require_pass(config.VALIDATION_DIR / "validation_report.json")
+    report = require_pass(config.VALIDATION_DIR / "validation_report.json")
     hashes = input_hashes(config.RAW_DIR)
     if args.calibration:
         start, end, frozen = PERIOD_START, CALIBRATION_END, None
@@ -141,6 +159,7 @@ def run_cmd(args: argparse.Namespace) -> None:
     else:
         period = freeze.read_freeze(freeze.FREEZE_PATH, hashes)["period"]
         start, end = date.fromisoformat(period["start"]), date.fromisoformat(period["end"])
+        _require_period(report, start, end)
         out = config.RESULTS_DIR
         frozen = {
             "path": freeze.FREEZE_PATH.relative_to(config.ROOT).as_posix(),
