@@ -167,12 +167,26 @@ def run_cmd(args: argparse.Namespace) -> None:
     )
 
 
+def _all_args(p: argparse.ArgumentParser) -> None:
+    _period_args(p)
+    _run_args(p)
+
+
+def all_cmd(args: argparse.Namespace) -> None:
+    """fetch, build, validate, run in order; --calibration applies to run only"""
+    period = argparse.Namespace(start=args.start, end=args.end)
+    for step in (fetch, build, validate):
+        step(period)
+    run_cmd(args)
+
+
 COMMANDS: dict[str, Callable[[argparse.Namespace], None]] = {
     "fetch": fetch,
     "build": build,
     "validate": validate,
     "freeze": freeze_cmd,
     "run": run_cmd,
+    "all": all_cmd,
 }
 ARGS: dict[str, Callable[[argparse.ArgumentParser], None]] = {
     "fetch": _period_args,
@@ -180,6 +194,7 @@ ARGS: dict[str, Callable[[argparse.ArgumentParser], None]] = {
     "validate": _period_args,
     "freeze": _freeze_args,
     "run": _run_args,
+    "all": _all_args,
 }
 
 
