@@ -30,8 +30,11 @@ def liquidation_week(ledger: pl.DataFrame, setting: MarginSetting, rules: Rules)
     liq = ledger.filter(pl.col("liquidated"))
     if liq.height:
         return _episode("liquidation", liq["ts_us"][0], "first liquidation")
-    # closest call: bars with a top-up pending (the landing bar after each run included), scored
-    # (trigger - frac) / (trigger - maintenance_frac) with maintenance read at that bar
+    # closest call: bars with a top-up pending (the landing bar after each run included), each
+    # scored (trigger - frac) / (trigger - maintenance_frac); the rule is the max per-bar score.
+    # maintenance_frac is read at the bar's own notional and tiers may differ across candidates
+    # (a $10M short sits in the 1% tier, a +20% mark move crosses into the 2% tier), so this is
+    # not always the bar of the lowest margin fraction.
     pending = pl.col("topup_pending")
     near = ledger.filter(pending | pending.shift(1, fill_value=False)).drop_nulls("margin_frac")
     note = "no liquidation; closest call"

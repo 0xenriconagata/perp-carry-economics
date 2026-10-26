@@ -72,6 +72,20 @@ def test_closest_call_when_no_liquidation():
     )
 
 
+def test_closest_call_is_max_score_not_lowest_margin_when_tiers_differ():
+    # continuous two-tier schedule: maintenance_frac is 0.005 below 1e6 notional, 0.0275 at 2e6
+    rules = Rules(0.001, 0.0005, 0.0125, 0.05, ((1e6, 0.005, 0.0), (math.inf, 0.05, 45_000.0)))
+    led = ledger(
+        [
+            (us(2021, 3, 2), 0.06, True, False),  # A: lowest fraction, notional 5e5 -> 0.6207
+            (us(2021, 3, 10), 0.07, True, False),  # B: notional 2e6 -> 0.08 / 0.1225 = 0.653
+        ]
+    ).with_columns(perp_qty=pl.Series([5_000.0, 20_000.0]))
+    ep = liquidation_week(led, PRIMARY, rules)
+    assert ep.anchor_us == us(2021, 3, 10)
+    assert ep.week_start == date(2021, 3, 8)
+
+
 def test_closest_call_without_pending_bars_falls_back_to_lowest_margin():
     led = ledger(
         [
@@ -102,7 +116,8 @@ def test_inversion_week_is_lowest_trailing_funding():
         rates[k] = -1e-3
     ep = inversion_week(print_bars(rates, us(2021, 3, 1)))
     assert ep.kind == "inversion"
-    # the trailing mean bottoms out at the last print of the dip: print 68 = 2021-03-23 16:00
+    # the trailing mean is flat over prints 68-80 (all nine dip prints in the window), first wins:
+    # print 68 = 2021-03-23 16:00
     assert ep.anchor_us == us(2021, 3, 23, 16)
     assert (ep.week_start, ep.week_end) == (date(2021, 3, 22), date(2021, 3, 29))
 
