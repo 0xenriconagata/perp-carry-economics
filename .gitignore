@@ -16,6 +16,9 @@ wheels/
 /data/
 !tests/fixtures/**
 
+# Calibration-window results (development only, never published)
+/results/calibration/
+
 # Tooling
 .pytest_cache/
 .mypy_cache/

@@ -7,12 +7,13 @@ from datetime import date
 
 import polars as pl
 
-from perp_carry_economics import checks, config, freeze
+from perp_carry_economics import checks, config, freeze, run
 from perp_carry_economics.bars import bars_path, build_bars, read_bars, write_bars
 from perp_carry_economics.carry.book import Mode, run_book
 from perp_carry_economics.config import CALIBRATION_END, PERIOD_START
 from perp_carry_economics.data.binance import (
     fetch_all,
+    load_depth,
     load_funding,
     load_mark,
     load_oi,
@@ -20,7 +21,8 @@ from perp_carry_economics.data.binance import (
 )
 from perp_carry_economics.data.fred import fetch_dtb3, load_tbill
 from perp_carry_economics.data.rules import load_rules
-from perp_carry_economics.params import PRIMARY
+from perp_carry_economics.io import text_hash
+from perp_carry_economics.params import NOTIONAL_USD, PRIMARY, sensitivity_grid
 from perp_carry_economics.validate import input_hashes, require_pass, write_report
 
 
@@ -119,25 +121,68 @@ def freeze_cmd(args: argparse.Namespace) -> None:
     )
 
 
+def _run_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--calibration", action="store_true")
+
+
+def run_cmd(args: argparse.Namespace) -> None:
+    """run every row, setting, episode and the capacity curve; write results/ (needs the
+    freeze) or, with --calibration, results/calibration/ on the calibration window"""
+    require_pass(config.VALIDATION_DIR / "validation_report.json")
+    hashes = input_hashes(config.RAW_DIR)
+    if args.calibration:
+        start, end, frozen = PERIOD_START, CALIBRATION_END, None
+        out = config.RESULTS_DIR / "calibration"
+    else:
+        period = freeze.read_freeze(freeze.FREEZE_PATH, hashes)["period"]
+        start, end = date.fromisoformat(period["start"]), date.fromisoformat(period["end"])
+        out = config.RESULTS_DIR
+        frozen = {
+            "path": freeze.FREEZE_PATH.relative_to(config.ROOT).as_posix(),
+            "text_hash": text_hash(freeze.FREEZE_PATH),
+        }
+    day = pl.from_epoch("ts_us", "us").dt.date()
+    bars = read_bars(config.INTERIM_DIR).filter(day.is_between(start, end, closed="left"))
+    if bars.is_empty():
+        raise SystemExit(f"no bars in [{start}, {end}); run `pce build` first")
+    oi = load_oi(config.RAW_DIR).filter(day.is_between(start, end, closed="left"))
+    depth = load_depth(config.RAW_DIR).filter(day.is_between(start, end, closed="left"))
+    info = {
+        "calibration": args.calibration,
+        "period": {"start": start.isoformat(), "end": end.isoformat()},
+        "input_hashes": hashes,
+        "freeze": frozen,
+    }
+    summary = run.run_all(
+        bars, load_rules(), oi, depth, out, sensitivity_grid(), NOTIONAL_USD, info
+    )
+    print(
+        f"ran [{start}, {end}) over {bars.height} bars -> {out}; "
+        f"worth_it {summary['worth_it']}, prediction_confirmed {summary['prediction_confirmed']}"
+    )
+
+
 COMMANDS: dict[str, Callable[[argparse.Namespace], None]] = {
     "fetch": fetch,
     "build": build,
     "validate": validate,
     "freeze": freeze_cmd,
+    "run": run_cmd,
 }
 ARGS: dict[str, Callable[[argparse.ArgumentParser], None]] = {
     "fetch": _period_args,
     "build": _period_args,
     "validate": _period_args,
     "freeze": _freeze_args,
+    "run": _run_args,
 }
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="pce", description="BTC cash-and-carry backtest.")
     sub = parser.add_subparsers(dest="command")
-    for name, run in COMMANDS.items():
-        p = sub.add_parser(name, help=run.__doc__)
+    for name, command in COMMANDS.items():
+        p = sub.add_parser(name, help=command.__doc__)
         if name in ARGS:
             ARGS[name](p)
     args = parser.parse_args(argv)
