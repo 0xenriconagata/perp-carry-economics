@@ -119,7 +119,7 @@ def write_freeze(path: Path, payload: dict[str, Any]) -> None:
 
 def read_freeze(path: Path, hashes: dict[str, str]) -> dict[str, Any]:
     """The frozen record; stops (never writes) if the file is unreadable or was frozen on
-    other inputs."""
+    other inputs, another rule snapshot or other params."""
     keep = "it is never rewritten: restore it from git"
     try:
         frozen = json.loads(path.read_text(encoding="utf-8"))
@@ -137,4 +137,11 @@ def read_freeze(path: Path, hashes: dict[str, str]) -> dict[str, Any]:
             f"{path} was frozen on other inputs ({', '.join(changed[:5]) or 'input_hashes'} "
             f"differ); {keep}"
         )
+    rules = frozen["rules"]
+    if not isinstance(rules, dict) or rules.get("text_hash") != text_hash(RULES_PATH):
+        raise SystemExit(f"{RULES_PATH} changed since the freeze; restore the frozen snapshot")
+    now = json.loads(json.dumps(_params()))  # tuples as lists, as frozen
+    then = frozen["params"] if isinstance(frozen["params"], dict) else {}
+    if changed := sorted(k for k in now.keys() | then.keys() if now.get(k) != then.get(k)):
+        raise SystemExit(f"params changed since the freeze: {', '.join(changed)}")
     return frozen

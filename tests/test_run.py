@@ -130,6 +130,17 @@ def test_summary_is_byte_identical_on_rerun(first, tmp_path):
         assert (tmp_path / name).read_bytes() == (out / name).read_bytes(), name
 
 
+def test_run_without_depth_skips_capacity(first, tmp_path):
+    out, summary = first
+    assert summary["capacity_depth_available"] is True
+    bars, oi, depth = world()
+    got = run.run_all(bars, RULES, oi, depth.clear(), tmp_path, SETTINGS, 1e7, INFO)
+    assert got["capacity_depth_available"] is False
+    assert got["capacity_usd"] is None and got["book_exhausted_at_any_size"] is False
+    header = (out / "capacity.csv").read_text().splitlines()[0]
+    assert (tmp_path / "capacity.csv").read_text() == header + "\n"
+
+
 def test_run_refuses_when_e_check_fails(tmp_path, monkeypatch):
     fail = CheckResult("E3 cash conservation", "FAIL", "broken", {})
     monkeypatch.setattr(checks, "check_e3_cash_conservation", lambda ledger: fail)
@@ -193,6 +204,15 @@ def test_cli_run_uses_the_frozen_period(cli_env):
         "input_hashes": {"f": "h"},
         "freeze": {"path": "results/carry_freeze.json", "text_hash": "fh"},
     }
+
+
+def test_cli_run_refuses_bars_that_stop_before_the_period_ends(cli_env, monkeypatch):
+    _, calls = cli_env
+    period = {"period": {"start": "2024-01-01", "end": "2024-01-03"}}
+    monkeypatch.setattr(freeze, "read_freeze", lambda path, hashes: period)
+    with pytest.raises(SystemExit, match="2024-01-01 to 2024-01-01"):
+        cli.main(["run"])
+    assert "run_all" not in calls
 
 
 def test_cli_run_calibration_needs_no_freeze(cli_env, monkeypatch):

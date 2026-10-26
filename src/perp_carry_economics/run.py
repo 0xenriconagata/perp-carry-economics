@@ -40,6 +40,15 @@ SENSITIVITY_COLUMNS = (
     "net_yield",
     "spread",
 )
+# capacity_curve's columns, for the header-only capacity.csv when there is no bookDepth
+CAPACITY_SCHEMA = {
+    "size_usd": pl.Float64,
+    "oi_share": pl.Float64,
+    "funding_haircut_yield": pl.Float64,
+    "slippage_yield": pl.Float64,
+    "modelled_spread": pl.Float64,
+    "book_exhausted": pl.Boolean,
+}
 
 
 def turnover(ledger: pl.DataFrame) -> int:
@@ -63,10 +72,6 @@ def _finite(v: Any) -> Any:
 
 def json_text(obj: Any) -> str:
     return json.dumps(_finite(obj), indent=2, sort_keys=True, allow_nan=False) + "\n"
-
-
-def _csv(df: pl.DataFrame, path: Path) -> None:
-    write_text_atomic(path, df.write_csv())
 
 
 def _sensitivity_row(
@@ -133,7 +138,12 @@ def run_all(
     lengths = stretches["prints"].to_list()
     base = dec["hold_through_B"]
     kappa, kappa_stderr, kappa_n = fit_kappa(prints, oi)
-    curve = capacity_curve(SIZES, base, kappa, oi, depth, ledger_b, notional)
+    depth_available = not depth.is_empty()  # bookDepth starts 2023-01-01: none in calibration
+    curve = (
+        capacity_curve(SIZES, base, kappa, oi, depth, ledger_b, notional)
+        if depth_available
+        else pl.DataFrame(schema=CAPACITY_SCHEMA)
+    )
     episodes = [liquidation_week(ledger_b, PRIMARY, rules), inversion_week(bars)]
 
     summary = _finite(
@@ -149,7 +159,8 @@ def run_all(
             "kappa": kappa,
             "kappa_stderr": kappa_stderr,
             "kappa_n": kappa_n,
-            "capacity_usd": capacity_usd(curve, base),
+            "capacity_depth_available": depth_available,
+            "capacity_usd": capacity_usd(curve, base) if depth_available else None,
             "book_exhausted_at_any_size": bool(curve["book_exhausted"].any()),
             "negative_stretches": {
                 "count": len(lengths),
@@ -159,20 +170,26 @@ def run_all(
         }
     )
 
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for k, name in LEDGER_FILES.items():
-        write_parquet_atomic(ledgers[k], out_dir / name)
-    _csv(pl.DataFrame(rows), out_dir / "decomposition.csv")
-    _csv(sensitivity, out_dir / "sensitivity.csv")
-    _csv(curve, out_dir / "capacity.csv")
-    _csv(stretches, out_dir / "negative_stretches.csv")
-    for e in episodes:
-        write_parquet_atomic(week_slice(ledger_b, e), out_dir / f"episode_{e.kind}.parquet")
+    # every output is built before the first write: a failure leaves no old/new mix behind
     eps = [
         {**asdict(e), "week_start": e.week_start.isoformat(), "week_end": e.week_end.isoformat()}
         for e in episodes
     ]
-    write_text_atomic(out_dir / "episodes.json", json_text(eps))
-    write_text_atomic(out_dir / "summary.json", json_text(summary))
+    frames = {name: ledgers[k] for k, name in LEDGER_FILES.items()} | {
+        f"episode_{e.kind}.parquet": week_slice(ledger_b, e) for e in episodes
+    }
+    texts = {
+        "decomposition.csv": pl.DataFrame(rows).write_csv(),
+        "sensitivity.csv": sensitivity.write_csv(),
+        "capacity.csv": curve.write_csv(),
+        "negative_stretches.csv": stretches.write_csv(),
+        "episodes.json": json_text(eps),
+        "summary.json": json_text(summary),
+    }
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for name, df in frames.items():
+        write_parquet_atomic(df, out_dir / name)
+    for name, text in texts.items():
+        write_text_atomic(out_dir / name, text)
     result: dict[str, Any] = summary
     return result

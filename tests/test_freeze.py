@@ -85,6 +85,26 @@ def test_read_freeze_refuses_changed_inputs(raw, tmp_path):
         freeze.read_freeze(path, input_hashes(raw))
 
 
+def test_read_freeze_refuses_changed_rules(raw, tmp_path, monkeypatch):
+    monkeypatch.setattr(freeze, "RULES_PATH", tmp_path / "rules.json")
+    shutil.copy(ASSET, freeze.RULES_PATH)
+    path = tmp_path / "carry_freeze.json"
+    payload = freeze.freeze_payload(raw, END)
+    freeze.write_freeze(path, payload)
+    freeze.RULES_PATH.write_text(ASSET.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="rules.json changed"):
+        freeze.read_freeze(path, payload["input_hashes"])
+
+
+def test_read_freeze_refuses_changed_params(raw, tmp_path, monkeypatch):
+    path = tmp_path / "carry_freeze.json"
+    payload = freeze.freeze_payload(raw, END)
+    freeze.write_freeze(path, payload)
+    monkeypatch.setattr(params, "M0", 0.3)
+    with pytest.raises(SystemExit, match=r"params changed since the freeze: M0$"):
+        freeze.read_freeze(path, payload["input_hashes"])
+
+
 def test_read_freeze_refuses_missing_keys_and_unreadable(tmp_path):
     path = tmp_path / "carry_freeze.json"
     with pytest.raises(SystemExit, match="cannot be read"):

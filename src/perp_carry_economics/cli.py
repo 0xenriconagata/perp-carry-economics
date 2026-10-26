@@ -3,7 +3,7 @@
 import argparse
 import json
 from collections.abc import Callable
-from datetime import date
+from datetime import date, timedelta
 
 import polars as pl
 
@@ -145,6 +145,11 @@ def run_cmd(args: argparse.Namespace) -> None:
     bars = read_bars(config.INTERIM_DIR).filter(day.is_between(start, end, closed="left"))
     if bars.is_empty():
         raise SystemExit(f"no bars in [{start}, {end}); run `pce build` first")
+    first, last = bars.select(first=day.first(), last=day.last()).row(0)
+    if (first, last) != (start, end - timedelta(days=1)):  # inner gaps are legitimate
+        raise SystemExit(
+            f"bars cover {first} to {last}, not [{start}, {end}); run `pce build` for the period"
+        )
     oi = load_oi(config.RAW_DIR).filter(day.is_between(start, end, closed="left"))
     depth = load_depth(config.RAW_DIR).filter(day.is_between(start, end, closed="left"))
     info = {
