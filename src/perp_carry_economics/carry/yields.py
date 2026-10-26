@@ -18,7 +18,8 @@ from perp_carry_economics.params import WORTH_IT_SPREAD, MarginSetting
 class Decomposition:
     """net = gross + negative - fees - liq_loss + unhedged_pnl + tbill_on_idle + basis.
 
-    `basis_usd` is the residual: spot-vs-mark convergence realised at resets and closes.
+    `basis_usd` is the residual: spot-vs-mark convergence realised at resets and closes. On an
+    engine ledger it equals sum(spot_mtm_usd + perp_mtm_usd) - sum(unhedged_pnl_usd).
     `missed_funding_usd` never moved cash, so it sits beside the identity, not in it."""
 
     years: float
