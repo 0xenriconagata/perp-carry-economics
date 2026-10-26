@@ -1,3 +1,29 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Secrets and local config
+.env
+
+# Data (downloaded or derived; reproducible via the pipeline)
+/data/
+!tests/fixtures/**
+
+# Tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
 # Local tooling workspaces
 .claude/
 .superpowers/
+
+# Built website (mkdocs build)
+/site/
