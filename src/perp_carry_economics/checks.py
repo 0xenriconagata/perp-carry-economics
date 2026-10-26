@@ -137,7 +137,7 @@ def check_d4_tbill_covers(tbill: pl.DataFrame, start: date, end: date) -> CheckR
 def check_e1_funding_total(ledger: pl.DataFrame, bars: pl.DataFrame) -> CheckResult:
     """Σ funding_usd recomputed as the engine pays it, rate × previous mark × previous
     perp_qty on bars hedged at the previous bar, equals the ledger's total exactly."""
-    if ledger["ts_us"].to_list() != bars["ts_us"].to_list():
+    if not ledger["ts_us"].equals(bars["ts_us"]):
         return CheckResult("E1 funding total", "FAIL", "ledger and bars differ in ts_us", {})
     prev = ledger.shift(1)
     # same operand order as the engine's `rate * m_prev * perp_qty`, so the same bits
@@ -190,6 +190,11 @@ def check_e3_cash_conservation(ledger: pl.DataFrame) -> CheckResult:
         "max_abs_residual_usd": worst,
         "tolerance_usd": tol,
     }
+    finite = residual.is_finite().fill_null(False)  # max() skips NaN and null; this does not
+    if not finite.all():
+        i = int((~finite).arg_true()[0]) + 1  # residual starts at bar 1
+        detail = f"non-finite residual from bar {i} (ts_us={ledger['ts_us'][i]})"
+        return CheckResult("E3 cash conservation", "FAIL", detail, numbers)
     detail = f"largest |residual| {worst:.3g} USD over {residual.len()} bars (tolerance {tol:g})"
     return CheckResult(
         "E3 cash conservation", _status(residual.len() > 0 and worst < tol), detail, numbers

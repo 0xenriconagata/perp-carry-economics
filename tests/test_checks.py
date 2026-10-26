@@ -178,6 +178,14 @@ def test_e3_fails_when_equity_moves_without_a_flow(ledger):
     assert r.status == "FAIL"
 
 
+@pytest.mark.parametrize("by", [float("nan"), None], ids=["nan", "null"])
+def test_e3_fails_and_names_the_first_non_finite_bar(ledger, by):
+    bumped = _bump(ledger, "equity_usd", 100, by)
+    r = check_e3_cash_conservation(bumped)
+    assert r.status == "FAIL"
+    assert f"bar 100 (ts_us={ledger['ts_us'][100]})" in r.detail
+
+
 # Report and gate
 
 

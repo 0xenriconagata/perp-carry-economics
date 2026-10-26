@@ -79,7 +79,7 @@ def test_cli_validate_exits_nonzero_and_still_writes_the_report_on_fail(data_dir
     assert report["checks"][2]["status"] == "FAIL"
 
 
-def test_fetch_defaults_to_the_period_start_and_last_full_month(data_dir, monkeypatch):
+def test_fetch_defaults_to_the_period_start_and_current_month_start(data_dir, monkeypatch):
     calls = []
     monkeypatch.setattr(cli, "fetch_all", lambda *a: calls.append(("binance", *a)))
     monkeypatch.setattr(cli, "fetch_dtb3", lambda *a: calls.append(("fred", *a)))
@@ -91,11 +91,11 @@ def test_fetch_defaults_to_the_period_start_and_last_full_month(data_dir, monkey
 @pytest.mark.parametrize(
     ("today", "end"),
     [
-        (date(2026, 10, 26), date(2026, 9, 1)),
-        (date(2026, 10, 1), date(2026, 9, 1)),
-        (date(2026, 1, 31), date(2025, 12, 1)),
+        (date(2026, 10, 26), date(2026, 10, 1)),
+        (date(2026, 10, 1), date(2026, 10, 1)),
+        (date(2026, 1, 31), date(2026, 1, 1)),
     ],
 )
-def test_default_end_is_first_day_of_last_full_month(today, end):
-    assert cli.default_end(today) == end
-    assert (cli.default_end(today).year, cli.default_end(today).month) != (today.year, today.month)
+def test_default_end_is_first_day_of_current_month(today, end):
+    # exclusive end: the last full month is in, no day of the current month is requested
+    assert cli.default_end(today) == end == today.replace(day=1)

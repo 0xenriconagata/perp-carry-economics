@@ -2,7 +2,7 @@
 
 import argparse
 from collections.abc import Callable
-from datetime import date, timedelta
+from datetime import date
 
 import polars as pl
 
@@ -24,9 +24,9 @@ from perp_carry_economics.validate import input_hashes, write_report
 
 
 def default_end(today: date) -> date:
-    """First day of the last full month before `today`, so never a day of the current month
-    (whose monthly Binance files are not published yet)."""
-    return (today.replace(day=1) - timedelta(days=1)).replace(day=1)
+    """First day of `today`'s month: the exclusive end keeps the last full (published) month
+    and requests no day of the current one, whose monthly Binance files do not exist yet."""
+    return today.replace(day=1)
 
 
 def _period_args(p: argparse.ArgumentParser) -> None:
