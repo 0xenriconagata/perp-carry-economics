@@ -1,0 +1,140 @@
+"""The pre-registration freeze (spec 10): every parameter, rule, snapshot and input hash,
+written once before the full-period run; the run refuses to proceed if any of it changed."""
+
+import json
+from dataclasses import asdict, is_dataclass
+from datetime import date
+from pathlib import Path
+from typing import Any
+
+from perp_carry_economics import params
+from perp_carry_economics.config import CALIBRATION_END, PERIOD_START, RESULTS_DIR, ROOT
+from perp_carry_economics.io import text_hash, write_text_atomic
+from perp_carry_economics.validate import input_hashes
+
+FREEZE_PATH = RESULTS_DIR / "carry_freeze.json"
+RULES_PATH = ROOT / "assets" / "binance_rules.json"
+SPEC_PATH = ROOT / "docs" / "specs" / "2026-10-26-perp-carry-economics-design.md"
+
+FREEZE_KEYS = (
+    "spec",
+    "params",
+    "rules",
+    "period",
+    "capital",
+    "seed",
+    "liquidation_accounting",
+    "capacity_model",
+    "closest_call_rule",
+    "kappa_fit",
+    "slippage",
+    "filter",
+    "check_tolerances",
+    "episode_rules",
+    "prediction",
+    "input_hashes",
+    "written_at",
+)
+
+_TEXTS = {
+    "capital": "(1 + m0 + reserve_frac) x notional per setting; 1.5 x notional at the primary "
+    "setting",
+    "seed": "both legs opened at N / mark on the first bar; funding starts at the first print "
+    "after it",
+    "liquidation_accounting": "all remaining margin equity at the liquidation price is lost "
+    "(covers the clearance fee); liquidation is checked intrabar on the mark high; conservative",
+    "capacity_model": "delta_funding ~ kappa * delta_log(sum_toptrader_long_short_ratio); a "
+    "short of share s of OI shifts the ratio by -log(1+2s) (top-trader shorts assumed half of "
+    "OI); haircut = kappa*log(1+2s)*1095/1.5; slippage from the engine's reset turnover priced "
+    "on bookDepth snapshots from 2023-01-01, uniform density within a band, perp book as spot "
+    "proxy; all terms annualised fractions of capital deployed (1.5 x notional)",
+    "closest_call_rule": "max over candidate bars (top-up pending or landing) of (trigger - "
+    "margin_frac) / (trigger - maintenance_frac at that bar); same score over all hedged bars "
+    "when no top-up was ever pending",
+    "kappa_fit": "OLS with intercept of per-print funding change on delta "
+    "log(sum_toptrader_long_short_ratio) sampled as-of <= 10 min stale, differences only "
+    "between consecutive prints 8h +- 1 min apart, non-finite rows dropped; classical OLS "
+    "stderr; haircut uses max(kappa, 0)",
+    "slippage": "bid side of bookDepth, uniform density within a band, last snapshot at or "
+    "before each trade bar; one-off open/close fills annualised over the hold, recurring "
+    "|delta perp_qty| x mark turnover over the depth period; both legs priced on the perp book "
+    "(spot proxy); a fill exceeding the published book marks that size book_exhausted; the "
+    "N-sized ledger is scaled linearly to each size (notional tiers ignored)",
+    "filter": "exit when trailing 21-print mean funding x 1095 < tbill_rate; re-enter when it "
+    "exceeds tbill_rate + round_trip_fee x 365/30; exit/re-entry on the bar after the signal "
+    "at the close; flat book earns T-bill; month_start while flat sweeps to capital",
+    "prediction": "cut filter does not beat hold-through on net spread after fees",
+}
+
+
+def _plain(v: Any) -> Any:
+    if is_dataclass(v) and not isinstance(v, type):
+        return asdict(v)
+    return list(v) if isinstance(v, tuple) else v
+
+
+def _params() -> dict[str, Any]:
+    out = {n: _plain(getattr(params, n)) for n in dir(params) if n.isupper()}
+    out["sensitivity_grid"] = [asdict(s) for s in params.sensitivity_grid()]
+    return out
+
+
+def _episode_rules() -> str:
+    """Spec section 8's text, between its heading and the next one."""
+    text = SPEC_PATH.read_bytes().decode("utf-8").replace("\r\n", "\n")
+    return text.split("## 8. Episode rules (frozen)\n", 1)[1].split("\n## 9.", 1)[0].strip()
+
+
+def freeze_payload(raw_dir: Path, period_end: date) -> dict[str, Any]:
+    return {
+        "spec": {"path": SPEC_PATH.relative_to(ROOT).as_posix(), "text_hash": text_hash(SPEC_PATH)},
+        "params": _params(),
+        "rules": {
+            "json": json.loads(RULES_PATH.read_text(encoding="utf-8")),
+            "text_hash": text_hash(RULES_PATH),
+        },
+        "period": {
+            "start": PERIOD_START.isoformat(),
+            "end": period_end.isoformat(),
+            "calibration_end": CALIBRATION_END.isoformat(),
+        },
+        **_TEXTS,
+        "check_tolerances": {
+            n: getattr(params, n)
+            for n in ("MARK_GAP_FAIL_MIN", "MARK_GAP_LIST_MIN", "OI_MISSING_DAYS_MAX_SHARE")
+        },
+        "episode_rules": _episode_rules(),
+        "input_hashes": input_hashes(raw_dir),
+        "written_at": date.today().isoformat(),
+    }
+
+
+def write_freeze(path: Path, payload: dict[str, Any]) -> None:
+    if path.exists():
+        raise FileExistsError(f"{path} exists: the freeze is written once, never edited")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(payload, indent=2, sort_keys=True, allow_nan=False)  # a NaN fails here
+    write_text_atomic(path, text + "\n")
+
+
+def read_freeze(path: Path, hashes: dict[str, str]) -> dict[str, Any]:
+    """The frozen record; stops (never writes) if the file is unreadable or was frozen on
+    other inputs."""
+    keep = "it is never rewritten: restore it from git"
+    try:
+        frozen = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise SystemExit(f"{path} cannot be read ({e}); {keep}") from None
+    if not isinstance(frozen, dict):
+        raise SystemExit(f"{path} is not a JSON object; {keep}")
+    if missing := [k for k in FREEZE_KEYS if k not in frozen]:
+        raise SystemExit(f"{path} lacks {missing}; {keep}")
+    got = frozen["input_hashes"]
+    if got != hashes:
+        known = got if isinstance(got, dict) else {}
+        changed = sorted(k for k in known.keys() | hashes.keys() if known.get(k) != hashes.get(k))
+        raise SystemExit(
+            f"{path} was frozen on other inputs ({', '.join(changed[:5]) or 'input_hashes'} "
+            f"differ); {keep}"
+        )
+    return frozen

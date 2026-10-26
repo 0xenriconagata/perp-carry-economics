@@ -1,12 +1,13 @@
 """Command-line entry point (`pce`); later tasks register their subcommands in COMMANDS."""
 
 import argparse
+import json
 from collections.abc import Callable
 from datetime import date
 
 import polars as pl
 
-from perp_carry_economics import checks, config
+from perp_carry_economics import checks, config, freeze
 from perp_carry_economics.bars import bars_path, build_bars, read_bars, write_bars
 from perp_carry_economics.carry.book import Mode, run_book
 from perp_carry_economics.config import CALIBRATION_END, PERIOD_START
@@ -20,7 +21,7 @@ from perp_carry_economics.data.binance import (
 from perp_carry_economics.data.fred import fetch_dtb3, load_tbill
 from perp_carry_economics.data.rules import load_rules
 from perp_carry_economics.params import PRIMARY
-from perp_carry_economics.validate import input_hashes, write_report
+from perp_carry_economics.validate import input_hashes, require_pass, write_report
 
 
 def default_end(today: date) -> date:
@@ -99,15 +100,36 @@ def validate(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+def _freeze_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--period-end", type=date.fromisoformat, required=True)
+
+
+def freeze_cmd(args: argparse.Namespace) -> None:
+    """write the pre-registration freeze (once) after the rule snapshot and validation pass"""
+    if json.loads(freeze.RULES_PATH.read_text(encoding="utf-8")).get("verified") is not True:
+        raise SystemExit(
+            f"{freeze.RULES_PATH} has verified: false; verify the fee/tier snapshot and set "
+            "verified to true yourself first"
+        )
+    require_pass(config.VALIDATION_DIR / "validation_report.json")
+    freeze.write_freeze(freeze.FREEZE_PATH, freeze.freeze_payload(config.RAW_DIR, args.period_end))
+    print(
+        f"froze {freeze.FREEZE_PATH}; next: git add results/carry_freeze.json && "
+        'git commit -m "Pre-registration freeze" && git tag carry-preregistered'
+    )
+
+
 COMMANDS: dict[str, Callable[[argparse.Namespace], None]] = {
     "fetch": fetch,
     "build": build,
     "validate": validate,
+    "freeze": freeze_cmd,
 }
 ARGS: dict[str, Callable[[argparse.ArgumentParser], None]] = {
     "fetch": _period_args,
     "build": _period_args,
     "validate": _period_args,
+    "freeze": _freeze_args,
 }
 
 
