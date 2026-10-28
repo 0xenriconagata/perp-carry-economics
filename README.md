@@ -1,6 +1,6 @@
 # perp-carry-economics
 
-**BTC cash-and-carry on Binance paid 5.1 % a year over T-bills on the capital a desk has to post, September 2020 to September 2026, against a 12.7 % headline of positive funding.** Almost all of it was 2021: since 2022 the trade has paid about 1.0 point over cash. How it would be measured was frozen before the run.
+**BTC cash-and-carry on Binance paid 5.1 % a year over T-bills on the capital a desk has to post, September 2020 to September 2026, against a 12.7 % headline of positive funding.** Most of it was 2021: since 2022 the trade has paid about 1.0 point over cash. How it would be measured was frozen before the run.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="results/figures/00_hero_dark.svg"><img alt="Waterfall from 12.7 % positive funding on $10 M notional to 5.1 % over T-bills on $15 M posted capital, September 2020 to September 2026" src="results/figures/00_hero.svg" width="100%"></picture>
 
@@ -9,7 +9,7 @@
 The calendar-year split was added after the run; see [below](#added-after-the-run).
 
 - Zero liquidations in six years at 4× margin with a four-hour top-up; closest call the week of 23 October 2023. The same book at 8× is liquidated 3 to 18 times, depending on how fast the desk tops up.
-- Capacity about $78 M before the modelled spread halves; past $300 M the perp book cannot fill the position.
+- Capacity about $78 M before the modelled spread halves; at $300 M the perp book cannot fill the position.
 - Cutting the trade on negative funding cost 0.2 points a year, as the freeze predicted; 57 round trips, five times the fees. Only 5 of 73 months lost money; the risk was never the bad month, it was five years of earning cash while posting margin for it.
 
 Parameters, rules, data hashes and the prediction were frozen on 2026-10-28, tag `carry-preregistered`, before the full period was run: [the freeze file](https://github.com/samuraixx-key/perp-carry-economics/blob/carry-preregistered/results/carry_freeze.json) and [the design it froze](https://github.com/samuraixx-key/perp-carry-economics/blob/carry-preregistered/docs/specs/2026-10-26-perp-carry-economics-design.md).
