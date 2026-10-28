@@ -1,6 +1,6 @@
 # perp-carry-economics
 
-**BTC cash-and-carry on Binance paid 5.1 % a year over T-bills on the capital a desk has to post, September 2020 to September 2026, against a 12.7 % headline of positive funding.** Most of it was 2021: since 2022 the trade has paid about 1.0 point over cash. How it would be measured was frozen before the run.
+**BTC cash-and-carry on Binance paid 5.1 % a year over T-bills on the capital a desk has to post, September 2020 to September 2026, against a 12.7 % headline of positive funding on notional.** Most of it was 2021: since 2022 the trade has paid about 1.0 point over cash. How it would be measured was frozen before the run.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="results/figures/00_hero_dark.svg"><img alt="Waterfall from 12.7 % positive funding on $10 M notional to 5.1 % over T-bills on $15 M posted capital, September 2020 to September 2026" src="results/figures/00_hero.svg" width="100%"></picture>
 
@@ -16,9 +16,9 @@ Parameters, rules, data hashes and the prediction were frozen on 2026-10-28, tag
 
 ## Below the fold
 
-### The inversion week (14 November 2022)
+### The inversion week (week of 14 November 2022)
 
-The frozen rule picks the calendar week with the lowest trailing 7-day (21-print) funding. The design expected October 2025; the rule picked the week after FTX failed. Over that week's 21 prints the book paid $4,520 in net funding on $10 M notional, needed no top-up, and its margin never fell below 48.9 % of notional against a 15 % trigger. Negative funding over the whole period comes in short stretches: 456 of them, 2.0 prints (16 hours) on average, the longest 18 prints (six days).
+The frozen rule picks the calendar week with the lowest trailing 7-day (21-print) funding. The design expected October 2025; the rule picked the week after FTX failed. Over that week's 21 prints the book paid $4,520 in net funding on the $10 M book, needed no top-up, and its margin never fell below 48.9 % of the position's value (about $8.4 M at that week's prices) against a 15 % trigger. Negative funding over the whole period comes in short stretches: 456 of them, 2.0 prints (16 hours) on average, the longest 18 prints (six days).
 
 ### One account, BTC as collateral (row A)
 
@@ -42,6 +42,8 @@ Capacity is modelled, not measured. The position is a permanent short share of o
 | $300 M | n/a | yes |
 | $1,000 M | n/a | yes |
 
+At $10 M the modelled spread is 4.7 %, not the 5.1 % headline, because the model charges what the headline does not: 0.3 points a year of funding impact and 0.03 points a year of slippage.
+
 ### Sensitivity: margin and top-up speed
 
 Each setting is measured on its own capital, (1 + m0 + reserve) × $10 M, with the trigger at 0.6 × m0 and the reserve equal to m0. The primary setting is m0 25 %, τ 4 h. At 4× the only liquidation in the grid comes with a one-day top-up.
@@ -63,7 +65,7 @@ Each setting is measured on its own capital, (1 + m0 + reserve) × $10 M, with t
 - Reverse carry (short spot, long perp) needs a spot-borrow series Binance does not publish, so negative funding is carried, not traded.
 - The coin-margined inverse perp with BTC as margin is the near-unliquidatable textbook form; it is not built because the liquidity sits in USD-M.
 - dYdX has no spot leg and a BTC book two orders of magnitude smaller.
-- Hyperliquid is a later phase: does the verdict survive on-chain.
+- Hyperliquid is a later phase, to test whether the verdict survives on-chain.
 - The 5 % BTC collateral haircut is the design's assumption, not checked against Binance at freeze; it touches only row A.
 - The book is reset to $10 M at each month start. A drift band is what a desk more often does; monthly is simpler and its fee accounting cleaner.
 
