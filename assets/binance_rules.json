@@ -4,9 +4,9 @@
   "liquidation_fee": 0.0125,
   "btc_collateral_haircut": 0.05,
   "vip": {
-    "tier": "assumed high-VIP schedule for a $10M desk (exact Binance VIP level not checked; user to name and verify)",
-    "spot_taker": 0.0004,
-    "perp_taker": 0.0002
+    "tier": "Binance VIP 3: assumes >= 20,000,000 USD 30-day spot volume (a 10M USD book reset monthly clears it on its own) and >= 100 BNB held; standard taker rates, BNB fee discount not modelled; one level for both legs (VIP level applies to all Binance products)",
+    "spot_taker": 0.0006,
+    "perp_taker": 0.00032
   },
   "tiers": [
     [300000, 0.004, 0],
@@ -25,9 +25,14 @@
   "tiers_note": "Each tier is [notional upper bound USD, maintenance rate, maintenance amount USD]; maintenance = rate x notional - amount. The last bound is null (no upper bound): Binance caps BTCUSDT at 1.8e9 USD notional (bracketNotionalCap of tier 12), which this snapshot does not model.",
   "source_urls": [
     "https://www.binance.com/en/futures/trading-rules/perpetual/leverage-margin",
-    "https://www.binance.com/bapi/futures/v1/friendly/future/common/brackets?symbol=BTCUSDT"
+    "https://www.binance.com/bapi/futures/v1/friendly/future/common/brackets?symbol=BTCUSDT",
+    "https://www.binance.com/en/fee/futureFee",
+    "https://www.binance.com/bapi/composite/v1/public/commission/futures-trade-level/get",
+    "https://www.binance.com/en/fee/trading",
+    "https://www.binance.com/en/futures/trading-rules/perpetual"
   ],
   "snapshot_date": "2026-10-26",
-  "tiers_source": "riskBrackets of the JSON endpoint behind the Leverage & Margin page, symbol BTCUSDT, endpoint updateTime 2025-08-19T06:36:24Z. Fee and liquidation-fee values are the design's, not read from Binance.",
-  "verified": false
+  "tiers_source": "riskBrackets of the JSON endpoint behind the Leverage & Margin page, symbol BTCUSDT, endpoint updateTime 2025-08-19T06:36:24Z; re-fetched 2026-10-28 and identical (assets/binance_brackets_BTCUSDT_2026-10-28.json). Fees checked 2026-10-28 against the JSON endpoint behind the USD-M fee page (assets/binance_futures_fee_levels_2026-10-28.json: level 0 taker 0.0005, level 3 taker 0.00032) and the spot fee page (Regular user taker 0.100%, VIP 3 taker 0.060%); standard rates, the then-running zero-maker/taker-discount perp promotion ignored. Liquidation clearance fee 1.25% read from the BTCUSDT row of the perpetual trading-rules page on 2026-10-28.",
+  "verified": false,
+  "haircut_note": "btc_collateral_haircut 0.05 is the design's assumption (Multi-Assets Mode BTC collateral ratio 95%); not verifiable from Binance's public pages on 2026-10-28 (collateral-ratio page 404, support search empty). It touches only the one-account (A) comparison row."
 }

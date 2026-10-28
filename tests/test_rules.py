@@ -82,7 +82,7 @@ def test_round_trip_fee():
 def test_vip_variant_changes_only_fees():
     r = load_rules()
     v = r.vip_variant()
-    assert (v.spot_taker, v.perp_taker) == (0.0004, 0.0002)
+    assert (v.spot_taker, v.perp_taker) == (0.0006, 0.00032)  # Binance VIP 3
     assert v.tiers == r.tiers
     assert (v.liquidation_fee, v.btc_collateral_haircut) == (0.0125, 0.05)
     assert v.vip_variant() == v
