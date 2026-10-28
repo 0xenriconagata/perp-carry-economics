@@ -1,5 +1,6 @@
 """House style for the figures: bundled Inter, light and dark palettes, deterministic SVG."""
 
+import io
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ from matplotlib import font_manager  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
 
 from perp_carry_economics.config import ROOT  # noqa: E402
+from perp_carry_economics.io import write_text_atomic  # noqa: E402
 
 FONT_DIR = ROOT / "assets" / "fonts"
 FONT_FILES = ("Inter-Regular.ttf", "Inter-SemiBold.ttf", "Inter-Bold.ttf")
@@ -117,8 +119,10 @@ def theme(mode: str) -> Iterator[Palette]:
 def save_svg(fig: Figure, path: Path) -> None:
     """Write the figure without a date stamp, then close it."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(path, format="svg", metadata={"Date": None})
+    buf = io.StringIO()
+    fig.savefig(buf, format="svg", metadata={"Date": None})
     plt.close(fig)
+    write_text_atomic(path, buf.getvalue())
 
 
 def fmt_pts(x: float, signed: bool = False) -> str:
