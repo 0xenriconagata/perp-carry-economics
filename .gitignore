@@ -19,6 +19,10 @@ wheels/
 # Calibration-window results (development only, never published)
 /results/calibration/
 
+# Full-period minute ledgers (~160 MB each, over GitHub's file limit; `pce run` rebuilds them
+# byte-identically, check E2)
+/results/ledger_*.parquet
+
 # Tooling
 .pytest_cache/
 .mypy_cache/

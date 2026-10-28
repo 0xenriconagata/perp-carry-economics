@@ -1,0 +1,16 @@
+[
+  {
+    "anchor_us": 1698114360000000,
+    "kind": "liquidation",
+    "note": "no liquidation; closest call",
+    "week_end": "2023-10-30",
+    "week_start": "2023-10-23"
+  },
+  {
+    "anchor_us": 1668585600000000,
+    "kind": "inversion",
+    "note": "lowest trailing 21-print funding",
+    "week_end": "2022-11-21",
+    "week_start": "2022-11-14"
+  }
+]

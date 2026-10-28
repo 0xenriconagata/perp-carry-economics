@@ -7,6 +7,7 @@ Where the project stands and what comes next. Each piece of work has a design sp
 
 | Work | What it delivered | Spec |
 |---|---|---|
+| Pre-registration freeze and the full-period run (2026-10-28) | Rules file verified at Binance VIP 3 with fee and bracket snapshots, validation 7/7 PASS, freeze for [2020-09-01, 2026-10-01) tagged `carry-preregistered`, `pce run` over 3,198,214 bars with E1–E3 PASS; summary, decomposition, sensitivity, capacity, episodes and negative stretches in `results/` (minute ledgers git-ignored, rebuilt by `pce run`) | [spec](specs/2026-10-26-perp-carry-economics-design.md) |
 | Engine and pre-registration tooling | Data download with checksum verification, minute bar table, carry book with the design-(B) margin model, cut filter, yield decomposition, episode rules, capacity model, checks D1–D4 and E1–E3, freeze, `pce run`, `pce all` | [spec](specs/2026-10-26-perp-carry-economics-design.md) |
 
 ## Next
@@ -43,6 +44,7 @@ messages or docs. Do them in the figures/README plan or when the file is next to
   empty `depth/`; `load_mark`'s dedup now runs before `build_bars`' duplicate guard can see a
   monthly-internal duplicate; junk strings in the top-trader ratio become null silently (bound the
   null share or warn); an unquoted blank `sum_open_interest` would pass the strict cast as null.
+- From the full run (2026-10-28): `oi_share` divides by `oi_usd` on 485 metrics rows (24 days between 2021-05-22 and 2025-07-21) where Binance reports zero open interest, raising a numpy divide-by-zero warning; the median is unaffected, so the number stands. Drop or warn on those rows when the file is next touched, and name them in the README's data notes.
 - Figures plan: write the VIP ledger too if the figures need it; slice the A and filter ledgers
   into the episode weeks (spec §8 "how each comparison row fared"); consider `kind="closest_call"`
   for the no-liquidation episode.
