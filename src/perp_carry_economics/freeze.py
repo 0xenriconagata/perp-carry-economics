@@ -39,6 +39,7 @@ FREEZE_KEYS = (
     "check_tolerances",
     "episode_rules",
     "prediction",
+    "calibration_note",
     "input_hashes",
     "written_at",
 )
@@ -86,6 +87,11 @@ _TEXTS = {
     "exceeds tbill_rate + round_trip_fee x 365/30; exit/re-entry on the bar after the signal "
     "at the close; flat book earns T-bill; month_start while flat sweeps to capital",
     "prediction": "cut filter does not beat hold-through on net spread after fees",
+    "calibration_note": "before this freeze the engine was run only on the declared "
+    "calibration window [2020-09-01, 2020-12-01), whose results are git-ignored and never "
+    "published; November 2020 is a rally month, so the margin model was watched handling one "
+    "rally before freezing; no engine result for the full period existed when the freeze was "
+    "written",
 }
 
 
