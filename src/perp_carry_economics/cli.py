@@ -12,6 +12,7 @@ import polars as pl
 from perp_carry_economics import checks, config, freeze, run
 from perp_carry_economics.bars import bars_path, build_bars, read_bars, write_bars
 from perp_carry_economics.carry.book import Mode, run_book
+from perp_carry_economics.carry.yields import yearly
 from perp_carry_economics.config import CALIBRATION_END, PERIOD_START
 from perp_carry_economics.data import fred
 from perp_carry_economics.data.binance import (
@@ -24,9 +25,10 @@ from perp_carry_economics.data.binance import (
 )
 from perp_carry_economics.data.fred import fetch_dtb3, load_tbill
 from perp_carry_economics.data.rules import load_rules
-from perp_carry_economics.io import text_hash
+from perp_carry_economics.io import text_hash, write_text_atomic
 from perp_carry_economics.params import NOTIONAL_USD, PRIMARY, sensitivity_grid
 from perp_carry_economics.validate import input_hashes, require_pass, write_report
+from perp_carry_economics.viz.render import render_all
 
 
 def default_end(today: date) -> date:
@@ -191,6 +193,31 @@ def run_cmd(args: argparse.Namespace) -> None:
     )
 
 
+def figures_cmd(args: argparse.Namespace) -> None:
+    """write results/yearly.csv from the primary ledger and render results/figures/
+    (light and dark SVG)"""
+    results = config.RESULTS_DIR
+    for path in (results / "summary.json", results / "ledger_B_primary.parquet"):
+        if not path.exists():
+            raise SystemExit(f"results/{path.name} missing; run `pce run` first")
+    summary = json.loads((results / "summary.json").read_text(encoding="utf-8"))
+    if summary["calibration"]:
+        raise SystemExit("results/ holds a calibration run; figures are for the frozen run only")
+    start, end = (date.fromisoformat(summary["period"][k]) for k in ("start", "end"))
+    day = pl.from_epoch("ts_us", "us").dt.date()
+    bars = read_bars(config.INTERIM_DIR).filter(day.is_between(start, end, closed="left"))
+    if bars.is_empty():
+        raise SystemExit(f"no bars in [{start}, {end}); run `pce build` first")
+    ledger = pl.read_parquet(results / "ledger_B_primary.parquet")
+    if ledger.height != bars.height:
+        raise SystemExit(f"the ledger has {ledger.height} rows but the bars {bars.height}")
+    write_text_atomic(
+        results / "yearly.csv", yearly(ledger, bars, PRIMARY, NOTIONAL_USD).write_csv()
+    )
+    written = render_all(results, results / "figures")
+    print(f"wrote {len(written)} figure files to results/figures")
+
+
 def _all_args(p: argparse.ArgumentParser) -> None:
     _period_args(p)
     _run_args(p)
@@ -210,6 +237,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], None]] = {
     "validate": validate,
     "freeze": freeze_cmd,
     "run": run_cmd,
+    "figures": figures_cmd,
     "all": all_cmd,
 }
 ARGS: dict[str, Callable[[argparse.ArgumentParser], None]] = {

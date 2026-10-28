@@ -30,6 +30,12 @@ uv run pce run
 
 Runs every row, setting, episode and the capacity curve and writes `results/`. The run time is expected to be minutes but has not been measured.
 
+```bash
+uv run pce figures
+```
+
+Writes `results/yearly.csv` from the primary ledger and renders `results/figures/` in light and dark SVG. The yearly split was added after the run and is not part of the frozen record.
+
 Reproducing a frozen run: pass `--end <frozen end>` (the freeze's `period.end`) to `fetch`, `build` and `validate`, so the raw files and the validation report cover exactly the frozen period; the default `--end` moves with today's date. `fetch` takes the T-bill series from `assets/DTB3.csv`, the copy pinned at freeze time, instead of downloading FRED's revised one. Extra raw files (a later month) do not block the run; a frozen file that is missing or differs does.
 
 `pce run` without `--calibration` requires `results/carry_freeze.json` to exist and refuses to run if the inputs, rules or parameters differ from what it records; the code checks the file's contents, the input hashes, the rules and the parameters. The git tag on the freeze commit is an audit trail for the reader. `pce freeze --period-end YYYY-MM-DD` writes the freeze; it needs a passing validation report and refuses until `assets/binance_rules.json` has `"verified": true`, which you set yourself after checking the fee and tier snapshot.
