@@ -38,6 +38,11 @@ messages or docs. Do them in the figures/README plan or when the file is next to
   capacity's first grid point is returned when the curve is already below half there; the filter
   hurdle is 3.65 %/yr at the placeholder fees; `pce fetch` on the 1st–3rd of a month requests an
   unpublished month; a `--start` after 2020-09-01 only certainly fails `validate` from 2020-12-01.
+- From the first real run (2026-10-28): `test_fetch_all` lost its `ok`-line count assertion
+  (now 11); `download_verified` creates the folder before the checksum GET, so a depth 404 leaves an
+  empty `depth/`; `load_mark`'s dedup now runs before `build_bars`' duplicate guard can see a
+  monthly-internal duplicate; junk strings in the top-trader ratio become null silently (bound the
+  null share or warn); an unquoted blank `sum_open_interest` would pass the strict cast as null.
 - Figures plan: write the VIP ledger too if the figures need it; slice the A and filter ledgers
   into the episode weeks (spec §8 "how each comparison row fared"); consider `kind="closest_call"`
   for the no-liquidation episode.
