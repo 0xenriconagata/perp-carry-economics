@@ -86,6 +86,16 @@ def test_fit_kappa_drops_stale_sample_and_never_diffs_across_the_gap():
     assert abs(k - KAPPA) < 2 * se
 
 
+def test_fit_kappa_drops_null_ratio_prints_and_never_diffs_across_them():
+    ts, rate, oi_ts, ratio = synthetic()
+    ratio = ratio.tolist()
+    ratio[200:210] = [None] * 10  # prints 200-209 sample a blank ratio
+    k, se, used = fit(ts, rate, oi_ts, ratio)
+    # diffs 199->200 .. 209->210 go (11); no 16h+ diff across the stretch
+    assert used == N_PRINTS - 1 - 11
+    assert abs(k - KAPPA) < 2 * se
+
+
 def test_fit_kappa_drops_nonfinite_rows():
     ts, rate, oi_ts, ratio = synthetic()
     rate[100] = np.nan

@@ -294,7 +294,10 @@ def load_spot(raw_dir: Path) -> pl.DataFrame:
 
 
 def load_oi(raw_dir: Path) -> pl.DataFrame:
-    """5-minute open interest and top-trader positions long/short ratio (see module docstring)."""
+    """5-minute open interest and top-trader positions long/short ratio (see module docstring).
+
+    The ratio is nullable: Binance leaves it blank over most of 2021-12-30 to 2022-12-14 and on
+    three single rows in 2023; the OI columns are never blank and stay strict."""
     return _load(
         raw_dir,
         "metrics",
@@ -305,7 +308,9 @@ def load_oi(raw_dir: Path) -> pl.DataFrame:
                 ts_us=_datetime_to_us("create_time"),
                 oi_btc=pl.col("sum_open_interest").cast(pl.Float64),
                 oi_usd=pl.col("sum_open_interest_value").cast(pl.Float64),
-                top_ls_position_ratio=pl.col("sum_toptrader_long_short_ratio").cast(pl.Float64),
+                top_ls_position_ratio=pl.col("sum_toptrader_long_short_ratio").cast(
+                    pl.Float64, strict=False
+                ),
             )
             .unique(maintain_order=True)
         ),  # the 2020-09-01 file lists every row twice

@@ -188,6 +188,25 @@ def test_load_oi_columns(tmp_path):
     assert df["top_ls_position_ratio"].to_list() == [1.23, 1.22]
 
 
+def test_load_oi_blank_ratio_is_null_but_blank_oi_raises(tmp_path):
+    blank = '""'  # Binance writes the blanks as quoted empty strings, which csv reads as ""
+    rows = [
+        ("2022-03-01 00:00:00", "39080.2", "456144339.2", blank, blank),
+        ("2022-03-01 00:05:00", "39106.4", "455693833.6", "1.18", "1.22"),
+    ]
+    mz.metrics_zip(tmp_path / "metrics" / "BTCUSDT-metrics-2022-03-01.zip", rows)
+    df = binance.load_oi(tmp_path)
+    assert df["top_ls_position_ratio"].to_list() == [None, 1.22]
+    assert df["oi_btc"].to_list() == [39080.2, 39106.4]
+    assert df["oi_usd"].to_list() == [456144339.2, 455693833.6]
+
+    bad = tmp_path / "bad"
+    rows[0] = ("2022-03-01 00:00:00", blank, "456144339.2", "1.18", "1.22")
+    mz.metrics_zip(bad / "metrics" / "BTCUSDT-metrics-2022-03-01.zip", rows)
+    with pytest.raises(pl.exceptions.InvalidOperationError):
+        binance.load_oi(bad)
+
+
 def test_load_depth_columns(tmp_path):
     rows = [
         ("2023-01-01 00:06:05", -5, "16770.3", "271987123.35"),
