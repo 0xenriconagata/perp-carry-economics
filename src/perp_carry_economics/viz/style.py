@@ -18,6 +18,8 @@ FONT_DIR = ROOT / "assets" / "fonts"
 FONT_FILES = ("Inter-Regular.ttf", "Inter-SemiBold.ttf", "Inter-Bold.ttf")
 FONT = "Inter"
 CANVAS = (11.5, 6.2)
+BAR_WIDTH = 0.72
+AX_RECT = (0.04, 0.17, 0.92, 0.60)  # left, bottom, width, height as figure fractions
 MODES = ("light", "dark")
 SVG_SALT = "pce-figures"
 

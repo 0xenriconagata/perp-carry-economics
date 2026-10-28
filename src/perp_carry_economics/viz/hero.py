@@ -7,15 +7,13 @@ from matplotlib.figure import Figure
 from matplotlib.patches import FancyBboxPatch
 
 from perp_carry_economics.viz.data import Results
-from perp_carry_economics.viz.style import CANVAS, FONT, current, fmt_pts
+from perp_carry_economics.viz.style import AX_RECT, BAR_WIDTH, CANVAS, FONT, current, fmt_pts
 
 CAPTION = (
     "Percentage points a year on the base each bar names. "
     "Source: Binance public data, FRED DTB3; run under the freeze `carry-preregistered`."
 )
-BAR_WIDTH = 0.72
 RADIUS_PX = 4
-AX_RECT = (0.04, 0.17, 0.92, 0.60)  # left, bottom, width, height as figure fractions
 
 
 def steps(row: dict[str, float]) -> list[tuple[str, float, str]]:
