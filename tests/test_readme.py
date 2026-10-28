@@ -29,7 +29,14 @@ def test_headline_numbers_match_the_run():
     assert f"cost {(b['spread'] - f['spread']) * 100:.1f} points a year" in text
     since_2022 = y.filter(pl.col("year") >= 2022)
     weighted = (since_2022["spread"] * since_2022["days"]).sum() / since_2022["days"].sum()
-    assert f"about {weighted * 100:.1f} point over cash" in text
+    assert f"about {weighted * 100:.1f} point over cash, and below cash since 2025." in text
+    assert (y.filter(pl.col("year") >= 2025)["spread"] < 0).all()
+
+
+def test_losing_months_match_the_monthly_sums():
+    m = pl.read_csv(ROOT / "results/monthly.csv")
+    neg, total = (m["sweep_usd"] < 0).sum(), m.height
+    assert f"Only {neg} of {total} months lost money" in text
 
 
 def test_capacity_table_matches_the_curve():

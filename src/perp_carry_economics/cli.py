@@ -12,7 +12,7 @@ import polars as pl
 from perp_carry_economics import checks, config, freeze, run
 from perp_carry_economics.bars import bars_path, build_bars, read_bars, write_bars
 from perp_carry_economics.carry.book import Mode, run_book
-from perp_carry_economics.carry.yields import yearly
+from perp_carry_economics.carry.yields import monthly, yearly
 from perp_carry_economics.config import CALIBRATION_END, PERIOD_START
 from perp_carry_economics.data import fred
 from perp_carry_economics.data.binance import (
@@ -28,7 +28,6 @@ from perp_carry_economics.data.rules import load_rules
 from perp_carry_economics.io import text_hash, write_text_atomic
 from perp_carry_economics.params import NOTIONAL_USD, PRIMARY, sensitivity_grid
 from perp_carry_economics.validate import input_hashes, require_pass, write_report
-from perp_carry_economics.viz.render import render_all
 
 
 def default_end(today: date) -> date:
@@ -194,8 +193,10 @@ def run_cmd(args: argparse.Namespace) -> None:
 
 
 def figures_cmd(args: argparse.Namespace) -> None:
-    """write results/yearly.csv from the primary ledger and render results/figures/
-    (light and dark SVG)"""
+    """write results/yearly.csv and results/monthly.csv from the primary ledger and render
+    results/figures/ (light and dark SVG)"""
+    from perp_carry_economics.viz.render import render_all  # only this command needs matplotlib
+
     results = config.RESULTS_DIR
     for path in (results / "summary.json", results / "ledger_B_primary.parquet"):
         if not path.exists():
@@ -214,6 +215,7 @@ def figures_cmd(args: argparse.Namespace) -> None:
     write_text_atomic(
         results / "yearly.csv", yearly(ledger, bars, PRIMARY, NOTIONAL_USD).write_csv()
     )
+    write_text_atomic(results / "monthly.csv", monthly(ledger, bars).write_csv())
     written = render_all(results, results / "figures")
     print(f"wrote {len(written)} figure files to results/figures")
 

@@ -1,6 +1,15 @@
+from pathlib import Path
+
 import vizfix
 
 from perp_carry_economics.viz.render import render_all
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_committed_svgs_are_rendered_from_committed_results(tmp_path):
+    for path in render_all(ROOT / "results", tmp_path / "figures"):
+        assert path.read_bytes() == (ROOT / "results" / "figures" / path.name).read_bytes(), path
 
 
 def test_renders_two_figures_in_two_modes_and_removes_stale(tmp_path):

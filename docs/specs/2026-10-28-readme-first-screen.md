@@ -19,10 +19,13 @@ the trade went on, and told me what it pays now, not what it averaged.*
    > **BTC cash-and-carry on Binance paid 5.1 % a year over T-bills on the capital a desk
    > has to post, September 2020 to September 2026, against a 12.7 % headline of positive
    > funding on notional.** Most of it was 2021: since 2022 the trade has paid about 1.0
-   > point over cash. How it would be measured was frozen before the run.
+   > point over cash, and below cash since 2025. How it would be measured was frozen before
+   > the run.
 
    Shipped wording. With sweeps attributed to the month they cover, 2021 is 72 % of the
-   period's spread point-years, so "almost all" was stronger than the files.
+   period's spread point-years, so "almost all" was stronger than the files. The "below cash
+   since 2025" clause is there because the belief is what the trade pays now, not what it
+   averaged: 2025 was −0.1 and January–September 2026 −1.4 points over cash.
 
 2. **Hero figure: the waterfall** (`results/figures/00_hero`). Seven columns, in this order:
    positive funding on $10 M notional (12.7) → same dollars on $15 M posted (−4.2) →
@@ -74,10 +77,11 @@ method and the spec's §15 amendments; reproduce.
 
 The calendar-year split was not in the freeze. It is a description of the frozen result,
 not a test: no threshold hangs on it and nothing is redefined. The README says so in one
-sentence next to the figure. Compute it in the figures code from the decomposition
-attributed to the month each sweep covers, as implemented: a bar's cash flows belong to its
-own calendar year, except a sweep on a month-start bar, which belongs to the year of the day
-before; `days` is distinct dates, and partial years (2020, 2026) are annualised over their days.
+sentence next to the figure. `pce figures` computed it from the decomposition attributed to
+the month each sweep covers: a bar's cash flows belong to its own calendar year, except a
+sweep on a month-start bar, which belongs to the year of the day before; `days` is distinct
+dates, and partial years (2020, 2026) are annualised over their days. It wrote the monthly
+sums the same way to `results/monthly.csv`, the source of "5 of 73 months lost money".
 
 ## Rules carried over from Project 1
 

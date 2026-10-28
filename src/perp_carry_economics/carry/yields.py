@@ -138,5 +138,27 @@ def yearly(
     )
 
 
+def monthly(ledger: pl.DataFrame, bars: pl.DataFrame) -> pl.DataFrame:
+    """Net sweep per calendar month (`month` is its first day), attributed as in `yearly`: a
+    sweep on a `month_start` bar belongs to the month of the day before. One row per month the
+    ledger touches; like `yearly`'s join, a nonzero sweep on the first bar would be dropped.
+    `ledger` and `bars` are row-aligned."""
+    ts = pl.col("ts_us")
+    month = pl.from_epoch(ts, "us").dt.month_start().dt.date()
+    prev_month = pl.from_epoch(ts - DAY_US, "us").dt.month_start().dt.date()
+    df = ledger.select(
+        "sweep_usd",
+        month=month,
+        sweep_month=pl.when(bars["month_start"]).then(prev_month).otherwise(month),
+    )
+    months = df.select(pl.col("month").unique().sort())
+    net = ordered_group_by(df, "sweep_month").agg(pl.col("sweep_usd").sum())
+    return (
+        months.join(net, left_on="month", right_on="sweep_month", how="left")
+        .with_columns(pl.col("sweep_usd").fill_null(0.0))
+        .sort("month")
+    )
+
+
 def worth_it(d: Decomposition) -> bool:
     return d.spread >= WORTH_IT_SPREAD

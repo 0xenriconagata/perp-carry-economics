@@ -55,5 +55,23 @@ messages or docs. Do them when the file is next touched.
   is not asserted equal to `fmt_pts(spread*100)`; the "5.1 %" answer text has about 3 px of margin
   inside its bar (a two-digit spread would overflow); `spread_by_year` raises on an empty yearly
   frame and silently skips an episode whose year has no bar; `pce figures` checks ledger/bars
-  alignment by row count only; the headline's "about 1.0 point over cash since 2022" is a
-  five-year mean carried by 2024 while 2025 and 2026 are below cash (only the yearly figure says so).
+  alignment by row count only.
+- Whole-branch review minors from the figures branch (2026-10-28), none changes a number:
+  - The figures are drawn on an 11.5 in canvas, so at GitHub's mobile width (~343 px) step values
+    and tick labels scale to about 4–5 px and only the title and the answer figure stay legible; a
+    narrower canvas with larger type needs a new eye check.
+  - `tests/test_readme.py` does not pin the yearly alt text, row A, VIP 3, the inversion week, the
+    method line, the negative-stretch counts, the round-trip count or "3 to 18".
+  - `style.register_fonts` lets a system-installed Inter win `findfont` ties; assert the resolved
+    path is inside `FONT_DIR`.
+  - `hero.py` hard-codes "$10 M" and "$15 M" in its labels although `steps()` accepts any row.
+  - A value in (−0.05, 0) prints "−0.0".
+  - `pce figures` always recomputes from the ledger, so re-rendering a colour change needs the full
+    rebuild; render from the committed CSVs when the ledger is absent.
+  - `render_all` leaves old and new SVGs mixed if a figure raises.
+  - `pce figures` with the ledger present but `data/interim/bars.parquet` missing raises a polars
+    traceback.
+  - T1: the ledger/bars positional alignment is unasserted.
+  - T2: the hash salt is pinned only within one process.
+  - T5: the stale-SVG glob is case-sensitive on Linux.
+  - T6: bar loading is duplicated from `run_cmd`, and the refusal paths are untested.

@@ -1,10 +1,10 @@
 # perp-carry-economics
 
-**BTC cash-and-carry on Binance paid 5.1 % a year over T-bills on the capital a desk has to post, September 2020 to September 2026, against a 12.7 % headline of positive funding on notional.** Most of it was 2021: since 2022 the trade has paid about 1.0 point over cash. How it would be measured was frozen before the run.
+**BTC cash-and-carry on Binance paid 5.1 % a year over T-bills on the capital a desk has to post, September 2020 to September 2026, against a 12.7 % headline of positive funding on notional.** Most of it was 2021: since 2022 the trade has paid about 1.0 point over cash, and below cash since 2025. How it would be measured was frozen before the run.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="results/figures/00_hero_dark.svg"><img alt="Waterfall from 12.7 % positive funding on $10 M notional to 5.1 % over T-bills on $15 M posted capital, September 2020 to September 2026" src="results/figures/00_hero.svg" width="100%"></picture>
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="results/figures/01_yearly_spread_dark.svg"><img alt="Spread over T-bills by calendar year: best 2021 at 22.2 points, worst 2026 (January to September) at -1.4 points" src="results/figures/01_yearly_spread.svg" width="100%"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="results/figures/01_yearly_spread_dark.svg"><img alt="Spread over T-bills by calendar year: best 2021 at 22.2 points, worst 2026 (January to September) at −1.4 points" src="results/figures/01_yearly_spread.svg" width="100%"></picture>
 
 The calendar-year split was added after the run; see [below](#added-after-the-run).
 
@@ -14,7 +14,7 @@ The calendar-year split was added after the run; see [below](#added-after-the-ru
 
 Parameters, rules, data hashes and the prediction were frozen on 2026-10-28, tag `carry-preregistered`, before the full period was run: [the freeze file](https://github.com/samuraixx-key/perp-carry-economics/blob/carry-preregistered/results/carry_freeze.json) and [the design it froze](https://github.com/samuraixx-key/perp-carry-economics/blob/carry-preregistered/docs/specs/2026-10-26-perp-carry-economics-design.md).
 
-## Below the fold
+## Details
 
 ### The inversion week (week of 14 November 2022)
 
@@ -71,7 +71,7 @@ Each setting is measured on its own capital, (1 + m0 + reserve) × $10 M, with t
 
 ### Added after the run
 
-The calendar-year split (the second figure and `results/yearly.csv`) and the count of losing months were not in the freeze. They describe the frozen result and test nothing: no threshold hangs on them and nothing in the freeze is redefined. Each monthly sweep is counted in the month it closes, so the yearly nets add up to the full-period net; 2020 and 2026 are partial years.
+The calendar-year split (the second figure and `results/yearly.csv`) and the count of losing months (from the monthly sums in `results/monthly.csv`) were not in the freeze. They describe the frozen result and test nothing: no threshold hangs on them and nothing in the freeze is redefined. Each monthly sweep is counted in the month it closes, so the yearly nets add up to the full-period net; 2020 and 2026 are partial years.
 
 ### Method
 
@@ -109,7 +109,7 @@ Runs every row, setting, episode and the capacity curve and writes `results/`. T
 uv run pce figures
 ```
 
-Writes `results/yearly.csv` from the primary ledger and renders `results/figures/` in light and dark SVG. The yearly split was added after the run and is not part of the frozen record.
+Writes `results/yearly.csv` and `results/monthly.csv` from the primary ledger and renders `results/figures/` in light and dark SVG. The yearly split and the monthly sums were added after the run and are not part of the frozen record.
 
 Reproducing a frozen run: pass `--end <frozen end>` (the freeze's `period.end`) to `fetch`, `build` and `validate`, so the raw files and the validation report cover exactly the frozen period; the default `--end` moves with today's date. `fetch` takes the T-bill series from `assets/DTB3.csv`, the copy pinned at freeze time, instead of downloading FRED's revised one. Extra raw files (a later month) do not block the run; a frozen file that is missing or differs does.
 

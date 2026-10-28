@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 
 import pytest
 import test_run
@@ -6,6 +8,11 @@ import vizfix
 
 from perp_carry_economics import cli, config
 from perp_carry_economics.bars import write_bars
+
+
+def test_cli_import_does_not_load_matplotlib():
+    code = "import sys, perp_carry_economics.cli; assert 'matplotlib' not in sys.modules"
+    subprocess.run([sys.executable, "-c", code], check=True)
 
 
 def test_figures_refuses_without_results(monkeypatch, tmp_path):
@@ -24,9 +31,10 @@ def test_figures_refuses_on_calibration_results(monkeypatch, tmp_path):
         cli.main(["figures"])
 
 
-def test_figures_writes_yearly_and_four_svgs(monkeypatch, tmp_path, capsys):
+def test_figures_writes_yearly_monthly_and_four_svgs(monkeypatch, tmp_path, capsys):
     results = vizfix.results_dir(tmp_path)
     (results / "yearly.csv").unlink()
+    (results / "monthly.csv").unlink()
     interim = tmp_path / "interim"
     interim.mkdir()
     write_bars(test_run.world()[0], interim)
@@ -34,5 +42,6 @@ def test_figures_writes_yearly_and_four_svgs(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(config, "INTERIM_DIR", interim)
     cli.main(["figures"])
     assert (results / "yearly.csv").exists()
+    assert (results / "monthly.csv").exists()
     assert len(list((results / "figures").glob("*.svg"))) == 4
     assert "wrote 4 figure files to results/figures" in capsys.readouterr().out
