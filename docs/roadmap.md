@@ -7,18 +7,18 @@ Where the project stands and what comes next. Each piece of work has a design sp
 
 | Work | What it delivered | Spec |
 |---|---|---|
+| Figures and the README briefing (2026-10-28) | `yearly()` and `pce figures`, which writes `results/yearly.csv` and the two figures, `00_hero` (waterfall) and `01_yearly_spread`, each in light and dark SVG under `results/figures/`; the README first screen, with its numbers tested against the result files | [spec](specs/2026-10-28-readme-first-screen.md) |
 | Pre-registration freeze and the full-period run (2026-10-28) | Rules file verified at Binance VIP 3 with fee and bracket snapshots, validation 7/7 PASS, freeze for [2020-09-01, 2026-10-01) tagged `carry-preregistered`, `pce run` over 3,198,214 bars with E1–E3 PASS; summary, decomposition, sensitivity, capacity, episodes and negative stretches in `results/` (minute ledgers git-ignored, rebuilt by `pce run`) | [spec](specs/2026-10-26-perp-carry-economics-design.md) |
 | Engine and pre-registration tooling | Data download with checksum verification, minute bar table, carry book with the design-(B) margin model, cut filter, yield decomposition, episode rules, capacity model, checks D1–D4 and E1–E3, freeze, `pce run`, `pce all` | [spec](specs/2026-10-26-perp-carry-economics-design.md) |
 
 ## Next
 
-- **Figures and the README briefing:** the figures and a README that tells the result as a story.
 - **Hyperliquid robustness** (own design when it starts).
 
 ## Backlog
 
 Deferred from the engine plan's reviews (2026-10-26); none changes a number, all are test hardening,
-messages or docs. Do them in the figures/README plan or when the file is next touched.
+messages or docs. Do them when the file is next touched.
 
 - Tests: literal spot-check of one grid setting; a pre-window T-bill print filling into `start`;
   spot ≠ mark at a filter re-entry; a funding print on a filter exit bar; conservation on a
@@ -33,7 +33,7 @@ messages or docs. Do them in the figures/README plan or when the file is next to
   files dated after `--period-end` (a freezer with extra months on disk makes a freeze that
   `--end <frozen end>` cannot satisfy); when a stale raw `DTB3.csv` differs from the asset the
   message should say to delete the raw file.
-- README (figures plan): the (A) row's `margin_equity` excludes spot collateral while
+- README data notes (not yet on the page): the (A) row's `margin_equity` excludes spot collateral while
   `margin_frac` includes it; exits/re-entries happen at the close before the intrabar
   liquidation check; `book_exhausted_at_any_size` is read with `capacity_depth_available`;
   capacity's first grid point is returned when the curve is already below half there; the filter
@@ -45,6 +45,15 @@ messages or docs. Do them in the figures/README plan or when the file is next to
   monthly-internal duplicate; junk strings in the top-trader ratio become null silently (bound the
   null share or warn); an unquoted blank `sum_open_interest` would pass the strict cast as null.
 - From the full run (2026-10-28): `oi_share` divides by `oi_usd` on 485 metrics rows (24 days between 2021-05-22 and 2025-07-21) where Binance reports zero open interest, raising a numpy divide-by-zero warning; the median is unaffected, so the number stands. Drop or warn on those rows when the file is next touched, and name them in the README's data notes.
-- Figures plan: write the VIP ledger too if the figures need it; slice the A and filter ledgers
+- Figures (deferred): write the VIP ledger too if the figures need it; slice the A and filter ledgers
   into the episode weeks (spec §8 "how each comparison row fared"); consider `kind="closest_call"`
   for the no-liquidation episode.
+- Review minors from the figures plan (2026-10-28), none changes a number: the yearly test does not
+  independently assert the days/365.25 divisor and the capital denominator; the yearly left join
+  would drop a nonzero sweep on a first-bar 1 January; `register_fonts` re-adds fonts on every
+  `theme()` call; the hero colour test asserts only three distinct facecolors, and the answer text
+  is not asserted equal to `fmt_pts(spread*100)`; the "5.1 %" answer text has about 3 px of margin
+  inside its bar (a two-digit spread would overflow); `spread_by_year` raises on an empty yearly
+  frame and silently skips an episode whose year has no bar; `pce figures` checks ledger/bars
+  alignment by row count only; the headline's "about 1.0 point over cash since 2022" is a
+  five-year mean carried by 2024 while 2025 and 2026 are below cash (only the yearly figure says so).

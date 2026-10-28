@@ -18,10 +18,13 @@ the trade went on, and told me what it pays now, not what it averaged.*
 
    > **BTC cash-and-carry on Binance paid 5.1 % a year over T-bills on the capital a desk
    > has to post, September 2020 to September 2026, against a 12.7 % headline of positive
-   > funding.** Almost all of it was 2021: since 2022 the trade has paid about one point
-   > over cash. How it would be measured was frozen before the run.
+   > funding on notional.** Most of it was 2021: since 2022 the trade has paid about 1.0
+   > point over cash. How it would be measured was frozen before the run.
 
-2. **Hero figure: the waterfall** (`figures/hero_waterfall`). Seven columns, in this order:
+   Shipped wording. With sweeps attributed to the month they cover, 2021 is 72 % of the
+   period's spread point-years, so "almost all" was stronger than the files.
+
+2. **Hero figure: the waterfall** (`results/figures/00_hero`). Seven columns, in this order:
    positive funding on $10 M notional (12.7) → same dollars on $15 M posted (−4.2) →
    T-bill on idle cash (+0.4) → negative funding (−0.5) → fees and basis (−0.2) → minus
    T-bills on all $15 M (−3.1) → **5.1 over cash**. Units once, in a caption: percentage
@@ -29,31 +32,25 @@ the trade went on, and told me what it pays now, not what it averaged.*
 
    Rendering rules (from the dataviz review): two fills only, blue for bars that add and
    grey one step darker than the mockup for bars that cut, the answer bar in the dark blue
-   with the hero figure inside in the same sans as the labels; bars about half the slot;
-   square corners on floating bars, 4 px rounded data-ends on the first and last bar only;
+   with the hero figure inside in the same sans as the labels; bars 0.72 of the slot rather than half (the 28 pt answer figure does not fit a
+   half-slot bar at the 11.5 in canvas); square corners on floating bars, 4 px rounded data-ends on the first and last bar only (as built, the first and last
+   bars are rounded at both ends);
    solid 1 px grey connectors, never dotted; one decimal everywhere; no y-axis, no
    gridlines; light and dark renders served through a `<picture>` element, each validated
    on its own surface.
 
-3. **Second figure: spread over cash by calendar year** (`figures/yearly_spread`). One bar
-   per year, same blue/grey by sign, the two episode weeks ticked on the axis. Provisional
-   values from monthly sweeps (compute properly in the figures code, see below):
-
-   | Year | Funding on notional | Net on capital | T-bill | Spread over cash |
-   |---|---|---|---|---|
-   | 2020 (Sep–Dec) | 18.1 % | 6.8 % | 0.4 % | 6.4 |
-   | 2021 | 34.0 % | 23.3 % | 0.1 % | 23.3 |
-   | 2022 | 4.2 % | 3.1 % | 2.0 % | 1.1 |
-   | 2023 | 8.4 % | 5.2 % | 5.1 % | 0.1 |
-   | 2024 | 12.9 % | 9.5 % | 5.0 % | 4.5 |
-   | 2025 | 5.3 % | 4.5 % | 4.1 % | 0.4 |
-   | 2026 (Jan–Sep) | 3.1 % | 2.7 % | 3.7 % | −1.0 |
+3. **Second figure: spread over cash by calendar year** (`results/figures/01_yearly_spread`). One bar
+   per year, same blue/grey by sign, the two episode weeks ticked on the axis. Values are in `results/yearly.csv`, with the attribution rule as implemented: a bar's cash
+   flows belong to its own calendar year, except a sweep on a month-start bar, which belongs
+   to the year of the day before; `days` is distinct dates; partial years are annualised over
+   their days. Spread over cash, in points: 2020 (Sep–Dec) 11.3, 2021 22.2, 2022 0.9, 2023 1.1,
+   2024 4.0, 2025 −0.1, 2026 (Jan–Sep) −1.4; the since-2022 day-weighted mean is 1.0.
 
 4. **Three facts, one line each.**
    - Zero liquidations in six years at 4× margin with a four-hour top-up; closest call the
      week of 23 October 2023. The same book at 8× is liquidated 3 to 18 times, depending on
      how fast the desk tops up.
-   - Capacity about $78 M before the modelled spread halves; past $300 M the perp book
+   - Capacity about $78 M before the modelled spread halves; at $300 M the perp book
      cannot fill the position.
    - Cutting the trade on negative funding cost 0.2 points a year, as the freeze predicted;
      57 round trips, five times the fees. Only 5 of 73 months lost money; the risk was never
@@ -78,9 +75,9 @@ method and the spec's §15 amendments; reproduce.
 The calendar-year split was not in the freeze. It is a description of the frozen result,
 not a test: no threshold hangs on it and nothing is redefined. The README says so in one
 sentence next to the figure. Compute it in the figures code from the decomposition
-attributed to the month each sweep covers (the provisional table above sums sweeps by the
-calendar year they land in, so each year carries one month of the year before, and 2020 and
-2026 are partial).
+attributed to the month each sweep covers, as implemented: a bar's cash flows belong to its
+own calendar year, except a sweep on a month-start bar, which belongs to the year of the day
+before; `days` is distinct dates, and partial years (2020, 2026) are annualised over their days.
 
 ## Rules carried over from Project 1
 
