@@ -64,9 +64,20 @@ def register_fonts() -> None:
         font_manager.fontManager.addfont(str(path))
 
 
+_active: Palette | None = None
+
+
+def current() -> Palette:
+    """The palette of the enclosing `theme` block; raises outside one."""
+    if _active is None:
+        raise RuntimeError("no active theme: draw inside `with theme(mode):`")
+    return _active
+
+
 @contextmanager
 def theme(mode: str) -> Iterator[Palette]:
     """House style for everything drawn inside the block."""
+    global _active
     if mode not in PALETTES:
         raise ValueError(f"unknown mode {mode!r}; expected one of {MODES}")
     register_fonts()
@@ -93,8 +104,12 @@ def theme(mode: str) -> Iterator[Palette]:
         "svg.fonttype": "path",
         "svg.hashsalt": SVG_SALT,
     }
-    with plt.rc_context(rc):  # type: ignore[arg-type]  # rcParams keys typed as literals
-        yield p
+    previous, _active = _active, p
+    try:
+        with plt.rc_context(rc):  # type: ignore[arg-type]  # rcParams keys typed as literals
+            yield p
+    finally:
+        _active = previous
 
 
 def save_svg(fig: Figure, path: Path) -> None:
