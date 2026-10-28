@@ -75,7 +75,8 @@ _TEXTS = {
     "log(sum_toptrader_long_short_ratio) sampled as-of <= 10 min stale, differences only "
     "between consecutive prints 8h +- 1 min apart, non-finite rows dropped; classical OLS "
     "stderr; haircut uses max(kappa, 0); prints whose OI sample has a blank top-trader "
-    "ratio are dropped (Binance publishes none from 2021-12-30 to 2022-12-14)",
+    "ratio are dropped (Binance published it on only ~20 days between 2021-12-30 and "
+    "2022-12-14)",
     "slippage": "bid side of bookDepth, uniform density within a band, last snapshot at or "
     "before each trade bar; one-off open/close fills annualised over the hold, recurring "
     "|delta perp_qty| x mark turnover over the depth period; both legs priced on the perp book "
