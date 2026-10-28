@@ -48,11 +48,20 @@ Column mapping (the capacity model relies on it):
     load_depth.pct                 <- percentage (signed level, negative = bids)
     load_depth.notional_usd        <- notional (USD to that level)
 
-Files are stored under raw_dir/{funding,mark,spot,metrics,depth}/ because mark and spot files
-share a name.
+The monthly markPriceKlines files omit nine whole UTC days (2021-07-01, 2021-07-24..27,
+2022-07-31, 2022-10-02, 2023-02-24, 2026-06-29). Binance publishes the daily file for each:
+
+    futures/um/daily/markPriceKlines/BTCUSDT/1m/BTCUSDT-1m-2021-07-24.zip
+
+`fetch_all` downloads the daily file for every day with no bar in the monthly files into
+mark_daily/, and `load_mark` reads both folders.
+
+Files are stored under raw_dir/{funding,mark,mark_daily,spot,metrics,depth}/ because mark and
+spot files share a name.
 """
 
 import hashlib
+import time
 import zipfile
 from collections.abc import Callable
 from datetime import date, timedelta
@@ -61,7 +70,7 @@ from pathlib import Path
 import httpx
 import polars as pl
 
-from perp_carry_economics.config import SYMBOL
+from perp_carry_economics.config import DAY_US, SYMBOL
 
 HOST = "https://data.binance.vision/data"
 FUTURES_MONTHLY = f"{HOST}/futures/um/monthly"
@@ -97,6 +106,10 @@ def mark_klines_url(year: int, month: int) -> str:
     return f"{FUTURES_MONTHLY}/markPriceKlines/{SYMBOL}/1m/{SYMBOL}-1m-{year}-{month:02d}.zip"
 
 
+def mark_daily_url(day: date) -> str:
+    return f"{FUTURES_DAILY}/markPriceKlines/{SYMBOL}/1m/{SYMBOL}-1m-{day}.zip"
+
+
 def spot_klines_url(year: int, month: int) -> str:
     return f"{SPOT_MONTHLY}/klines/{SYMBOL}/1m/{SYMBOL}-1m-{year}-{month:02d}.zip"
 
@@ -120,6 +133,9 @@ def _sha256(path: Path) -> str:
 def download_verified(url: str, dest: Path, client: httpx.Client) -> Path:
     """Download url to dest unless a file matching Binance's published SHA256 is already there.
 
+    The two requests (.CHECKSUM, then the zip) are tried up to 3 times on httpx.TransportError
+    (sleeping 2 s, 4 s); the last error propagates. A ChecksumError is never retried.
+
     The .CHECKSUM file is saved next to the zip as the exact bytes received, so validation can
     re-verify offline (it is not an input: `validate.input_hashes` skips it). If both files
     exist and the zip matches the stored checksum, nothing is requested at all. A zip that is
@@ -130,17 +146,24 @@ def download_verified(url: str, dest: Path, client: httpx.Client) -> Path:
         stored = checksum_path.read_bytes().split()
         if stored and _sha256(dest) == stored[0].decode():
             return dest
-    checksum_body = client.get(url + ".CHECKSUM").raise_for_status().content
-    expected = checksum_body.split()[0].decode()
-    if dest.exists() and _sha256(dest) == expected:
-        checksum_path.write_bytes(checksum_body)
-        return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(dest.name + ".part")
-    with client.stream("GET", url) as r, tmp.open("wb") as f:
-        r.raise_for_status()
-        for chunk in r.iter_bytes():
-            f.write(chunk)
+    for attempt in range(1, 4):  # network part only; a retry rewrites .part from scratch
+        try:
+            checksum_body = client.get(url + ".CHECKSUM").raise_for_status().content
+            expected = checksum_body.split()[0].decode()
+            if dest.exists() and _sha256(dest) == expected:
+                checksum_path.write_bytes(checksum_body)
+                return dest
+            with client.stream("GET", url) as r, tmp.open("wb") as f:
+                r.raise_for_status()
+                for chunk in r.iter_bytes():
+                    f.write(chunk)
+            break
+        except httpx.TransportError:
+            if attempt == 3:
+                raise
+            time.sleep(2 * attempt)
     if _sha256(tmp) != expected:
         tmp.unlink()
         raise ChecksumError(f"checksum mismatch for {dest.name}")
@@ -182,6 +205,10 @@ def _months(start: date, end: date) -> list[tuple[int, int]]:
     return out
 
 
+def _days(start: date, end: date) -> list[date]:
+    return [start + timedelta(days=i) for i in range((end - start).days)]
+
+
 def fetch_all(start: date, end: date, raw_dir: Path) -> None:
     """Download every file for [start, end); files already verified on disk are not requested."""
     jobs: list[tuple[str, str]] = []
@@ -191,22 +218,30 @@ def fetch_all(start: date, end: date, raw_dir: Path) -> None:
             ("mark", mark_klines_url(y, m)),
             ("spot", spot_klines_url(y, m)),
         ]
-    for i in range((end - start).days):
-        day = start + timedelta(days=i)
+    for day in _days(start, end):
         jobs.append(("metrics", metrics_url(day)))
         if day >= DEPTH_START:
             jobs.append(("depth", book_depth_url(day)))
     with httpx.Client(timeout=120, follow_redirects=True) as client:
-        for folder, url in jobs:
-            dest = raw_dir / folder / url.rsplit("/", 1)[1]
-            try:
-                download_verified(url, dest, client)
-            except httpx.HTTPStatusError as e:
-                if folder != "depth" or e.response.status_code != 404:
-                    raise
-                print(f"missing {folder}/{dest.name} (not published)")  # see module docstring
-                continue
-            print(f"ok {folder}/{dest.name}")
+
+        def run(jobs: list[tuple[str, str]]) -> None:
+            for folder, url in jobs:
+                dest = raw_dir / folder / url.rsplit("/", 1)[1]
+                try:
+                    download_verified(url, dest, client)
+                except httpx.HTTPStatusError as e:
+                    if folder != "depth" or e.response.status_code != 404:
+                        raise
+                    print(f"missing {folder}/{dest.name} (not published)")  # see module docstring
+                    continue
+                print(f"ok {folder}/{dest.name}")
+
+        run(jobs)
+        # Monthly mark files omit whole days; fill each from its daily file (a 404 here raises).
+        have = set(_load(raw_dir, "mark", f"{SYMBOL}-1m-*.zip", _klines)["ts_us"] // DAY_US)
+        missing = [d for d in _days(start, end) if (d - date(1970, 1, 1)).days not in have]
+        run([("mark_daily", mark_daily_url(d)) for d in missing])
+        print("mark days filled from daily files: " + (", ".join(map(str, missing)) or "none"))
 
 
 def _load(
@@ -241,8 +276,16 @@ def load_funding(raw_dir: Path) -> pl.DataFrame:
 
 
 def load_mark(raw_dir: Path) -> pl.DataFrame:
-    """Mark-price 1-minute OHLC; ts_us is the bar open."""
-    return _load(raw_dir, "mark", f"{SYMBOL}-1m-*.zip", _klines)
+    """Mark-price 1-minute OHLC; ts_us is the bar open.
+
+    Reads the monthly files and the daily files in mark_daily/ that fill the days the monthly
+    ones omit. A day present in both would otherwise double, so rows with a repeated ts_us are
+    dropped, keeping the first."""
+    df = _load(raw_dir, "mark", f"{SYMBOL}-1m-*.zip", _klines)
+    if any((raw_dir / "mark_daily").glob("*.zip")):
+        daily = _load(raw_dir, "mark_daily", f"{SYMBOL}-1m-*.zip", _klines)
+        df = pl.concat([df, daily]).sort("ts_us", maintain_order=True)
+    return df.unique("ts_us", keep="first", maintain_order=True)
 
 
 def load_spot(raw_dir: Path) -> pl.DataFrame:

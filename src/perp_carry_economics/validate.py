@@ -9,7 +9,7 @@ from perp_carry_economics import config
 from perp_carry_economics.checks import CheckResult
 from perp_carry_economics.io import file_hash, write_text_atomic
 
-BINANCE_FOLDERS = ("funding", "mark", "spot", "metrics", "depth")
+BINANCE_FOLDERS = ("funding", "mark", "mark_daily", "spot", "metrics", "depth")
 
 
 def input_hashes(raw_dir: Path) -> dict[str, str]:

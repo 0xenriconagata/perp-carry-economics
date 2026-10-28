@@ -213,6 +213,13 @@ def test_input_hashes_key_every_raw_file_by_relative_path(tmp_path):
     assert sorted(input_hashes(_raw(tmp_path))) == ["fred/DTB3.csv", "funding/x.zip"]
 
 
+def test_input_hashes_include_mark_daily_zips(tmp_path):
+    raw = _raw(tmp_path)
+    (raw / "mark_daily").mkdir()
+    (raw / "mark_daily" / "BTCUSDT-1m-2021-07-24.zip").write_bytes(b"zip")
+    assert "mark_daily/BTCUSDT-1m-2021-07-24.zip" in input_hashes(raw)
+
+
 def test_input_hashes_skip_sidecars_part_files_and_strays(tmp_path):
     raw = _raw(tmp_path)
     for name in ("funding/x.zip.CHECKSUM", "funding/y.zip.part", "fred/DTB3.csv.sha256"):

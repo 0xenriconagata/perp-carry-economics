@@ -74,6 +74,9 @@ def test_urls_match_binance_layout():
     assert binance.mark_klines_url(2020, 9) == (
         f"{fut}/monthly/markPriceKlines/BTCUSDT/1m/BTCUSDT-1m-2020-09.zip"
     )
+    assert binance.mark_daily_url(date(2021, 7, 24)) == (
+        f"{fut}/daily/markPriceKlines/BTCUSDT/1m/BTCUSDT-1m-2021-07-24.zip"
+    )
     assert binance.spot_klines_url(2020, 9) == (
         "https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1m/BTCUSDT-1m-2020-09.zip"
     )
@@ -140,6 +143,24 @@ def test_load_mark_converts_ms_to_us(tmp_path):
     assert df["close"].to_list() == [100.5, 101.5, 102.5]
 
 
+DAY_MS = 86_400_000
+
+
+def test_load_mark_fills_a_missing_day_from_daily_without_duplicates(tmp_path):
+    def bar(t):
+        return (t, 1.0, 1.0, 1.0, 1.0)
+
+    # monthly file lacks day 1 (T0_MS + DAY_MS); the daily file has it and also repeats day 2
+    mz.klines_zip(
+        tmp_path / "mark" / "BTCUSDT-1m-2020-09.zip",
+        [bar(T0_MS), bar(T0_MS + 2 * DAY_MS)],
+    )
+    mz.klines_zip(tmp_path / "mark_daily" / "BTCUSDT-1m-2020-09-02.zip", [bar(T0_MS + DAY_MS)])
+    mz.klines_zip(tmp_path / "mark_daily" / "BTCUSDT-1m-2020-09-03.zip", [bar(T0_MS + 2 * DAY_MS)])
+    df = binance.load_mark(tmp_path)
+    assert df["ts_us"].to_list() == [T0_US + i * DAY_MS * 1000 for i in range(3)]
+
+
 def test_load_spot_reads_its_own_folder_and_accepts_us_timestamps(tmp_path):
     mz.klines_zip(tmp_path / "mark" / "BTCUSDT-1m-2020-09.zip", [(T0_MS, 1.0, 1.0, 1.0, 1.0)])
     mz.klines_zip(tmp_path / "spot" / "BTCUSDT-1m-2025-01.zip", [(T0_US, 2.0, 3.0, 1.0, 2.5)])
@@ -190,7 +211,15 @@ def test_loader_without_files_names_the_folder(tmp_path):
 
 
 def test_fetch_all_requests_each_file_once_and_depth_only_from_2023(tmp_path, monkeypatch, capsys):
-    client = FakeClient(lambda url: url.encode())
+    t = 1_672_358_400_000  # 2022-12-30 00:00:00 UTC
+    mark_body = mz.klines_zip(
+        tmp_path / "mark_body.zip", [(t + i * DAY_MS, 1.0, 1.0, 1.0, 1.0) for i in (0, 2)]
+    ).read_bytes()  # bars on 12-30 and 01-01 only: 12-31 is the missing day
+
+    def body(url):
+        return mark_body if "/monthly/markPriceKlines/" in url else url.encode()
+
+    client = FakeClient(body)
     monkeypatch.setattr(httpx, "Client", lambda **kw: client)
     binance.fetch_all(date(2022, 12, 30), date(2023, 1, 2), tmp_path)
     zips = [u.rsplit("/", 1)[1] for u in client.urls if not u.endswith(".CHECKSUM")]
@@ -206,24 +235,76 @@ def test_fetch_all_requests_each_file_once_and_depth_only_from_2023(tmp_path, mo
             "BTCUSDT-metrics-2022-12-31.zip",
             "BTCUSDT-metrics-2023-01-01.zip",
             "BTCUSDT-bookDepth-2023-01-01.zip",
+            "BTCUSDT-1m-2022-12-31.zip",  # mark_daily, the only missing day
         ]
     )
+    assert "BTCUSDT-1m-2022-12-31.zip" in [u.rsplit("/", 1)[1] for u in client.urls]
+    assert (tmp_path / "mark_daily" / "BTCUSDT-1m-2022-12-31.zip").exists()
+    assert "mark days filled from daily files: 2022-12-31" in capsys.readouterr().out
     assert (tmp_path / "mark" / "BTCUSDT-1m-2022-12.zip").exists()
     assert (tmp_path / "spot" / "BTCUSDT-1m-2022-12.zip").exists()
-    assert capsys.readouterr().out.count("ok ") == 10
     n = len(client.urls)
     binance.fetch_all(date(2022, 12, 30), date(2023, 1, 2), tmp_path)
     assert len(client.urls) == n  # everything already verified: no requests
 
 
 def test_fetch_all_skips_unpublished_depth_day_but_not_other_404s(tmp_path, monkeypatch, capsys):
-    client = FakeClient(lambda url: url.encode(), missing=("bookDepth-2023-01-01",))
+    jan1 = mz.klines_zip(tmp_path / "m.zip", [(1_672_531_200_000, 1.0, 1.0, 1.0, 1.0)])
+
+    def body(url):
+        return jan1.read_bytes() if "/monthly/markPriceKlines/" in url else url.encode()
+
+    client = FakeClient(body, missing=("bookDepth-2023-01-01",))
     monkeypatch.setattr(httpx, "Client", lambda **kw: client)
     binance.fetch_all(date(2023, 1, 1), date(2023, 1, 2), tmp_path)
     assert "missing depth/BTCUSDT-bookDepth-2023-01-01.zip" in capsys.readouterr().out
     assert not list((tmp_path / "depth").glob("*"))
 
-    client = FakeClient(lambda url: url.encode(), missing=("metrics-2023-01-01",))
+    client = FakeClient(body, missing=("metrics-2023-01-01",))
     monkeypatch.setattr(httpx, "Client", lambda **kw: client)
     with pytest.raises(httpx.HTTPStatusError):
         binance.fetch_all(date(2023, 1, 1), date(2023, 1, 2), tmp_path / "fresh")
+
+
+def test_download_verified_retries_transport_errors_but_not_checksum(tmp_path, monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(binance.time, "sleep", sleeps.append)
+
+    class Flaky(FakeClient):
+        def __init__(self, fails: int, stream_fails: int = 0, **kw):
+            super().__init__(lambda url: b"zip bytes", **kw)
+            self.fails, self.stream_fails = fails, stream_fails
+
+        def get(self, url):
+            if self.fails:
+                self.fails -= 1
+                raise httpx.ReadError("connection reset")
+            return super().get(url)
+
+        def stream(self, method, url):
+            if self.stream_fails:
+                self.stream_fails -= 1
+                raise httpx.ReadError("connection reset")
+            return super().stream(method, url)
+
+    dest = tmp_path / "a.zip"
+    # one dropped checksum GET, then one dropped stream: both retried, nothing half-written
+    (tmp_path / "a.zip.part").write_bytes(b"stale half file")
+    binance.download_verified("https://h/a.zip", dest, Flaky(1, 1))
+    assert dest.read_bytes() == b"zip bytes"
+    assert sleeps == [2, 4]
+    assert not list(tmp_path.glob("*.part"))
+
+    sleeps.clear()
+    other = tmp_path / "b.zip"
+    with pytest.raises(httpx.ReadError):
+        binance.download_verified("https://h/b.zip", other, Flaky(3))
+    assert sleeps == [2, 4]
+    assert not other.exists()
+
+    sleeps.clear()
+    with pytest.raises(binance.ChecksumError):
+        binance.download_verified(
+            "https://h/c.zip", tmp_path / "c.zip", Flaky(0, bad_checksum=True)
+        )
+    assert sleeps == []
