@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass
 import polars as pl
 
 from perp_carry_economics.config import DAY_US
+from perp_carry_economics.io import ordered_group_by
 from perp_carry_economics.params import WORTH_IT_SPREAD, MarginSetting
 
 
@@ -78,6 +79,62 @@ def decompose(
         net_yield=net_yield,
         tbill_mean=tbill_mean,
         spread=net_yield - tbill_mean,
+    )
+
+
+def yearly(
+    ledger: pl.DataFrame, bars: pl.DataFrame, setting: MarginSetting, notional: float
+) -> pl.DataFrame:
+    """`decompose`'s headline numbers per calendar year, for the yearly spread figure.
+
+    A bar's cash flows belong to its own year, except a sweep on a `month_start` bar: it pays
+    out the month before, so it belongs to the year of the previous day. The nets therefore
+    sum to `decompose(...).net_usd`. `ledger` and `bars` are row-aligned."""
+    ts = pl.col("ts_us")
+    year = pl.from_epoch(ts, "us").dt.year().cast(pl.Int32)
+    prev_year = pl.from_epoch(ts - DAY_US, "us").dt.year().cast(pl.Int32)
+    df = ledger.select(
+        "ts_us",
+        "funding_usd",
+        "sweep_usd",
+        day=pl.from_epoch(ts, "us").dt.date(),
+        year=year,
+        sweep_year=pl.when(bars["month_start"]).then(prev_year).otherwise(year),
+        tbill=pl.when(bars["day_start"]).then(bars["tbill_rate"]),
+    )
+    by_bar = ordered_group_by(df, "year").agg(
+        pl.col("day").n_unique().cast(pl.Int64).alias("days"),
+        pl.col("day").min().alias("first_day"),
+        pl.col("day").max().alias("last_day"),
+        pl.col("funding_usd").filter(pl.col("funding_usd") > 0).sum().alias("gross_funding_usd"),
+        pl.col("tbill").mean().alias("tbill_mean"),
+    )
+    net = ordered_group_by(df, "sweep_year").agg(pl.col("sweep_usd").sum().alias("net_usd"))
+    capital = (1 + setting.m0 + setting.reserve_frac) * notional
+    years = pl.col("days") / 365.25
+    return (
+        by_bar.join(net, left_on="year", right_on="sweep_year", how="left")
+        .with_columns(pl.col("net_usd").fill_null(0.0))
+        .with_columns(
+            partial=pl.col("days") < 365,
+            gross_yield=pl.col("gross_funding_usd") / notional / years,
+            net_yield=pl.col("net_usd") / capital / years,
+        )
+        .with_columns(spread=pl.col("net_yield") - pl.col("tbill_mean"))
+        .select(
+            "year",
+            "days",
+            "partial",
+            "first_day",
+            "last_day",
+            "gross_funding_usd",
+            "net_usd",
+            "gross_yield",
+            "net_yield",
+            "tbill_mean",
+            "spread",
+        )
+        .sort("year")
     )
 
 
