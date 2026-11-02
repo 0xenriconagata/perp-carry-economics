@@ -34,3 +34,4 @@ wheels/
 
 # Built website (mkdocs build)
 /site/
+docs/superpowers/
