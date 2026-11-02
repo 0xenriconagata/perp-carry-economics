@@ -12,7 +12,7 @@ The calendar-year split was added after the run; see [below](#added-after-the-ru
 - Capacity about $78 M before the modelled spread halves; at $300 M the perp book cannot fill the position.
 - Cutting the trade on negative funding cost 0.2 points a year, as the freeze predicted; 57 round trips, five times the fees. Only 5 of 73 months lost money; the risk was never the bad month, it was five years of earning cash while posting margin for it.
 
-Parameters, rules, data hashes and the prediction were frozen on 2026-10-28, tag `carry-preregistered`, before the full period was run: [the freeze file](https://github.com/samuraixx-key/perp-carry-economics/blob/carry-preregistered/results/carry_freeze.json) and [the design it froze](https://github.com/samuraixx-key/perp-carry-economics/blob/carry-preregistered/docs/specs/2026-10-26-perp-carry-economics-design.md).
+Parameters, rules, data hashes and the prediction were frozen on 2026-10-28, tag `carry-preregistered`, before the full period was run: [the freeze file](https://github.com/0xenriconagata/perp-carry-economics/blob/carry-preregistered/results/carry_freeze.json) and [the design it froze](https://github.com/0xenriconagata/perp-carry-economics/blob/carry-preregistered/docs/specs/2026-10-26-perp-carry-economics-design.md).
 
 ## Details
 
